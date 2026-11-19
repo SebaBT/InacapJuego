@@ -79,6 +79,13 @@ export const plaza = {
   bikeRack: { x0: -22.2, x1: -18.2, z0: -24.2, z1: -21.2 }
 };
 
+const gate = plaza.exteriorGate;
+export const gateFixtures = {
+  masterKey: { x: gate.x - gate.width / 2 - .18, y: 1.32, z: gate.z - .17, label: 'Cerradura' },
+  boltCutters: { x: gate.x, y: 1.25, z: gate.z - .08, label: 'Cadena' },
+  fuse: { x: gate.x + gate.width / 2 + .18, y: 1.38, z: gate.z - .17, label: 'Caja de fusibles' }
+};
+
 // Anexo mantiene las escaleras y agrega puerta lateral hacia el Pasaje Norte
 export const annex = {
   id: 'anexo', label: 'Anexo y Escaleras', height: 3.74,

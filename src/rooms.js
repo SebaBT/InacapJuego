@@ -1,6 +1,7 @@
 import { Box3, BoxGeometry, CylinderGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, PlaneGeometry, TorusGeometry, Vector3 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { annex, furnishingBays, hall, landing, plaza, plazaLights, rooms, stairs, switchOffset, wallThickness } from './layout.js';
+import { annex, furnishingBays, gateFixtures, hall, landing, plaza, plazaLights, rooms, stairs, switchOffset, wallThickness } from './layout.js';
+import { poseDoorLeaf } from './doors.js';
 import { roomPlate } from './textures.js';
 
 const { halfWidth: W, height: H } = hall;
@@ -1381,29 +1382,45 @@ export function buildRooms({
       closedDirX: -s,
       closedDirZ: 0,
       swingDirX: 0,
-      swingDirZ: 1,
+      swingDirZ: -1,
       obstacle: leafObstacle
     });
-    gateHandles.push(group3(leafPivot, -s * 0.16, 1.15, -.08));
+    gateHandles.push(group3(leafPivot, -s * (gHalf - .12), 1.32, -.08));
   }
 
-  // Diegetic lock visuals on Portón Exterior:
-  // 1) Chain & padlock on center meeting bars (boltCutters)
-  const lockChainGroup = group(dynamicRoot, gate.x, 19.60, 0);
-  for (let i = -4; i <= 4; i++) {
-    const link = piece(lockChainGroup, doorTrim, new TorusGeometry(.038, .009, 6, 14),
-      i * .059, 1.20 + .003 * i * i, -.083, i % 2 ? 0x929c98 : 0xbac0b6);
-    link.scale.x = 1.35;
-    link.rotation.x = i % 2 ? .95 : -.20;
-    link.rotation.z = i * .04;
+  // Each strand hangs from a ring welded to its own leaf. The padlock
+  // joins the two strands at the seam until the cutters shear the last link.
+  const strands = gatePivots.map(({ group: leaf, closedDirX: inward }) => {
+    const barX = inward * (gHalf - .12);
+    box(leaf, solid, barX, 1.36, -.035, .095, .14, .05, 0x495750);
+    const eye = piece(leaf, doorTrim, new TorusGeometry(.037, .011, 8, 16),
+      barX, 1.34, -.077, 0xaab6aa);
+    eye.rotation.y = Math.PI / 2;
+    const chain = group3(leaf, barX, 1.33, -.108);
+    chain.name = inward > 0 ? 'Cadena izquierda' : 'Cadena derecha';
+    for (let i = 0; i < 3; i++) {
+      const link = piece(chain, doorTrim, new TorusGeometry(.028, .008, 7, 16),
+        inward * (.010 + .044 * i), -.012 - i * .018, 0, i % 2 ? 0x91a099 : 0xc3c8b8);
+      link.scale.x = 1.3;
+      link.rotation.set(i % 2 ? .88 : .12, 0, -inward * .36);
+    }
+    return { chain, inward };
+  });
+  const lock = group3(strands[0].chain, .114, -.075, -.008);
+  piece(lock, doorTrim, new TorusGeometry(.031, .008, 8, 16), 0, 0, 0, 0xdfc49a).scale.y = 1.35;
+  box(lock, solid, 0, -.058, 0, .086, .081, .048, 0xc28c43);
+  box(lock, solid, 0, -.056, -.026, .012, .025, .004, 0x302c29);
+  function setChainCut(cut) {
+    for (const { chain, inward } of strands) chain.rotation.z = cut ? -inward * 1.12 : 0;
+    lock.rotation.z = -strands[0].chain.rotation.z;
   }
-  piece(lockChainGroup, doorTrim, new TorusGeometry(.034, .009, 6, 14),
-    0, 1.17, -.105, 0xdac39c).scale.y = 1.3;
-  box(lockChainGroup, solid, 0, 1.09, -.105, .105, .11, .05, 0xc28c43);
-  box(lockChainGroup, solid, 0, 1.10, -.132, .014, .032, .004, 0x302c29);
 
+  // Fixed posts support the electric controls on the plaza side.
+  for (const { x } of [gateFixtures.fuse, gateFixtures.masterKey]) {
+    box(gateContainer, solid, x - gate.x, 1.51, -.045, .16, 3.02, .16, 0x303b36);
+  }
   // 2) Electrical fuse box on East gate post (fuse)
-  const lockFuseBox = group(dynamicRoot, gate.x + gHalf + 0.18, 19.50, 0);
+  const lockFuseBox = group(dynamicRoot, gateFixtures.fuse.x, gateFixtures.fuse.z + .07, 0);
   box(lockFuseBox, solid, 0, 1.38, 0, .24, .34, .12, 0x3b4540);
   const fuseLedRed = box(lockFuseBox, luminous, 0, 1.49, -.07, .07, .04, .02, 0xe84836);
   const fuseLedGreen = box(lockFuseBox, luminous, 0, 1.49, -.07, .07, .04, .02, 0x55e08a);
@@ -1412,7 +1429,7 @@ export function buildRooms({
   fusePlug.visible = false;
 
   // 3) Security key reader on West gate post (masterKey)
-  const lockKeyBox = group(dynamicRoot, gate.x - gHalf - 0.18, 19.50, 0);
+  const lockKeyBox = group(dynamicRoot, gateFixtures.masterKey.x, gateFixtures.masterKey.z + .07, 0);
   box(lockKeyBox, solid, 0, 1.32, 0, .20, .28, .10, 0x343f3b);
   const keyLedRed = box(lockKeyBox, luminous, 0, 1.41, -.06, .06, .04, .02, 0xe84836);
   const keyLedGreen = box(lockKeyBox, luminous, 0, 1.41, -.06, .06, .04, .02, 0x55e08a);
@@ -1420,9 +1437,13 @@ export function buildRooms({
   const keyBlade = box(lockKeyBox, solid, 0, 1.26, -.08, .04, .04, .09, 0xe8cf6a);
   keyBlade.visible = false;
 
-  const latch = group3(dynamicRoot, gate.x, 1.28, 19.52);
+  const left = gatePivots[0].group, right = gatePivots[1].group;
+  // Two guides on the left rail carry the entire bolt when it retracts.
+  for (const offset of [-.39, -.17]) box(left, doorTrim, gHalf + offset, 1.55, -.066, .065, .11, .12, 0x58625a);
+  box(right, doorTrim, -gHalf + .13, 1.55, -.066, .10, .11, .12, 0x58625a);
+  const latch = group3(left, gHalf - .10, 1.55, -.085);
   latch.name = 'Cerrojo del portón';
-  box(latch, solid, 0, 0, -.02, .48, .055, .055, 0xa7a99a);
+  box(latch, solid, 0, 0, -.02, .57, .055, .055, 0xa7a99a);
   box(latch, solid, .13, .045, -.04, .028, .12, .035, 0xac9a72);
   const centerBlocker = {
     x0: gate.x - gHalf,
@@ -1454,10 +1475,10 @@ export function buildRooms({
 
   specials.gateControl = {
     door: portonDoor,
-    setLatch(t) { latch.position.x = gate.x + .32 * t; latch.visible = t < .99; },
+    setLatch(t) { latch.position.x = gHalf - .10 - .32 * t; },
     setLockVisual(kind, unlocked) {
       if (kind === 'boltCutters') {
-        lockChainGroup.visible = !unlocked;
+        setChainCut(unlocked);
       } else if (kind === 'fuse') {
         fuseLedRed.visible = !unlocked;
         fuseLedGreen.visible = unlocked;
@@ -1469,13 +1490,13 @@ export function buildRooms({
       }
     },
     reset() {
-      latch.position.x = gate.x;
-      latch.visible = true;
+      this.setLatch(0);
       portonDoor.locked = true;
       portonDoor.open = 0;
       portonDoor.targetOpen = 0;
       centerBlocker.active = true;
-      lockChainGroup.visible = true;
+      for (const pivot of gatePivots) poseDoorLeaf(pivot, 0);
+      setChainCut(false);
       fuseLedRed.visible = true;
       fuseLedGreen.visible = false;
       fusePlug.visible = false;

@@ -1,11 +1,12 @@
 import {
-  BackSide, Camera, Mesh, NearestFilter, PlaneGeometry, Scene, ShaderMaterial,
-  Vector2, Vector3, Vector4, WebGLRenderer, WebGLRenderTarget
+  BackSide, Camera, DepthTexture, LinearMipmapLinearFilter, Mesh, NearestFilter, PlaneGeometry, Scene, ShaderMaterial,
+  UnsignedIntType, Vector2, Vector3, Vector4, WebGLRenderer, WebGLRenderTarget
 } from 'three';
 import {
   annex, annexDoorWidth, benchZ, classroomDoorWidth, extraLights, hall, hallWindows,
   lights, lightX, pairedFixtureOffset, plaza, plazaLights, rooms
 } from './layout.js';
+import { createHeadCensor } from './head-censor.js';
 import { SCREEN_FX_MASK } from './screen-fx.js';
 
 const worldVertex = `
@@ -14,9 +15,6 @@ const worldVertex = `
   varying vec3 surfaceNormal;
   varying vec2 texCoord;
   varying vec3 paint;
-  #ifdef FACE_MOSAIC
-  varying vec3 headPoint;
-  #endif
   #ifdef TORN_SLEEVE
   attribute vec4 tearCoord;
   varying vec4 tubePoint;
@@ -58,9 +56,6 @@ const worldVertex = `
     surfaceNormal = mat3(modelMatrix) * objectNormal;
     texCoord = uv;
     paint = color;
-    #ifdef FACE_MOSAIC
-    headPoint = position;
-    #endif
     gl_Position = projectionMatrix * viewMatrix * world;
     #endif
   }
@@ -106,9 +101,6 @@ const worldFragment = `
   varying vec3 surfaceNormal;
   varying vec2 texCoord;
   varying vec3 paint;
-  #ifdef FACE_MOSAIC
-  varying vec3 headPoint;
-  #endif
   #ifdef TORN_SLEEVE
   varying vec4 tubePoint;
   uniform float garmentWear;
@@ -261,15 +253,7 @@ const worldFragment = `
     #ifdef ALPHA_TEXTURE
     if (texel.a < 0.04) discard;
     #endif
-    #ifdef FACE_MOSAIC
-    // Cells follow the head as it turns. Their values contain no face data.
-    vec2 cell = floor(vec2(atan(headPoint.x, headPoint.z + 0.0001) * 3.6, headPoint.y / 7.0));
-    float value = fract(sin(dot(cell, vec2(41.13, 19.27))) * 9738.51);
-    float band = floor(value * 5.0) * 0.25;
-    vec3 base = mix(vec3(0.095, 0.102, 0.106), vec3(0.82, 0.81, 0.77), band);
-    #else
     vec3 base = texel.rgb * paint;
-    #endif
     float bSkyWorld = clamp(bloodSky, 0.0, 1.0);
     if (isWindow > 0.5) {
       vec3 nightBase = mix(base * vec3(0.28, 0.42, 0.52), base * vec3(0.88, 0.16, 0.14), bSkyWorld);
@@ -928,7 +912,11 @@ export function makeRenderer(canvas) {
   const hazardMotion = { value: 1 };
   const hazardBearing = { value: new Vector2(0, -1) };
   const hazardSide = { value: 0 };
-  const target = new WebGLRenderTarget(1, 1, { minFilter: NearestFilter, magFilter: NearestFilter });
+  const target = new WebGLRenderTarget(1, 1, {
+    minFilter: LinearMipmapLinearFilter, magFilter: NearestFilter, generateMipmaps: true,
+    depthTexture: new DepthTexture(1, 1, UnsignedIntType)
+  });
+  const headCensor = createHeadCensor(target);
   const screen = new Scene(), screenCamera = new Camera();
   const quad = new Mesh(new PlaneGeometry(2, 2), new ShaderMaterial({
     uniforms: {
@@ -945,7 +933,7 @@ export function makeRenderer(canvas) {
   function material(texture, {
     emission = 0, floor = false, repeat, window = false, lampIndex = -1, monster = false,
     shininess = 0, opacity = 1, alphaTexture = false, emissiveMap = null, emissivePower = 1,
-    skybox = false, faceMosaic = false
+    skybox = false
   } = {}) {
     const defines = {
       LAMP_COUNT: lights.length,
@@ -962,7 +950,6 @@ export function makeRenderer(canvas) {
     };
     if (alphaTexture) defines.ALPHA_TEXTURE = 1;
     if (skybox) defines.SKYBOX = 1;
-    if (faceMosaic) defines.FACE_MOSAIC = 1;
     const isFloor = Boolean(floor && !skybox);
     const uniforms = {
       strips, extraStrips, doorOpenings, roomBounds, plazaPortal, outerWindows, room, benchCenter: { value: benchZ },
@@ -1005,7 +992,7 @@ export function makeRenderer(canvas) {
     if (typeof renderer.compile === 'function') renderer.compile(scene, camera);
   }
 
-  function draw(scene, camera, screenFx = null) {
+  function draw(scene, camera, screenFx = null, headSurfaces = null) {
     const fx = camera.userData?.postFx;
     sprintCloud.value = fx ? fx.sprintCloud : 0;
     if (fx) headBlur.value.set(fx.headBlurX, fx.headBlurY);
@@ -1020,8 +1007,10 @@ export function makeRenderer(canvas) {
     hazardMotion.value = screenFx?.motion ?? 1;
     hazardBearing.value.set(screenFx?.bearingX ?? 0, screenFx?.bearingY ?? -1);
     hazardSide.value = screenFx?.side || 0;
+    target.texture.mipmapsAutoUpdate = Boolean(headSurfaces?.length);
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);
+    quad.material.uniforms.frame.value = headCensor.apply(renderer, camera, headSurfaces);
     renderer.setRenderTarget(null);
     renderer.render(screen, screenCamera);
   }

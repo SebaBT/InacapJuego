@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { PerspectiveCamera, Raycaster, Scene, ShaderMaterial, Vector3 } from 'three';
 import { createAtmosphere } from '../src/atmosphere.js';
-import { createCinematics } from '../src/cinematics.js';
+import { createCinematics, setGateOpenVisual } from '../src/cinematics.js';
 import { buildCorridor } from '../src/corridor.js';
 import {
   allGateLocksUnlocked,
@@ -147,6 +147,10 @@ test('all physical items exist inside worldBounds, populate equipable inventory,
     assert.ok(p.z >= worldBounds.minZ && p.z <= worldBounds.maxZ);
     assert.ok(ITEM_CATALOG[p.kind]);
   }
+  assert.ok(EQUIP_SLOTS.includes('roid'), 'Roid occupies the old decoy slot');
+  assert.equal(EQUIP_SLOTS.includes('decoy'), false);
+  assert.equal(ITEM_CATALOG.roid.category, 'tool');
+  assert.match(ITEM_CATALOG.roid.purpose, /huya|huir/i);
 
   const scene = new Scene();
   const world = createWorldItems({ scene, makeMaterial: stubMaterial });
@@ -203,20 +207,36 @@ test('all physical items exist inside worldBounds, populate equipable inventory,
   assert.equal(fuseItem.group.visible, true);
 }));
 
+test('inventory stows the held item without dropping it, and X brings it back', () => {
+  const inv = createInventory();
+  inv.add('roid');
+  inv.add('roid');
+  const slot = inv.slots.find(s => s.kind === 'roid');
+  assert.equal(inv.equipped, 'roid');
+  assert.equal(slot.count, 2);
+  assert.equal(inv.handsFree, false);
+
+  assert.equal(inv.unequip(), true);
+  assert.equal(inv.equipped, null);
+  assert.equal(inv.handsFree, true);
+  assert.equal(slot.count, 2, 'stowing never consumes or drops the item');
+  assert.equal(inv.has('roid'), true);
+
+  assert.equal(inv.toggleHolster(), true);
+  assert.equal(inv.equipped, 'roid', 'the last held item is restored');
+  assert.equal(inv.toggleHolster(), true);
+  assert.equal(inv.equipped, null);
+
+  assert.equal(inv.cycle(1), inv.slots.findIndex(s => s.kind === 'roid'));
+  assert.equal(inv.equipped, 'roid');
+});
+
 test('guidance identifies the next physical doorway, both stair approaches, and the gate after out-of-order pickups', () => withCanvasStub(() => {
   const map = buildCorridor(stubMaterial);
   const { navigation } = createMonsterHunt({ obstacles: map.obstacles, doors: map.doors, destruction: map.destruction });
   const guide = createObjectiveGuide(navigation), inventory = createInventory();
   const locks = createMatchState().gateLocks;
   const route = (x, z, yaw = 0) => guide.update({ x, z, yaw }, inventory, locks);
-  const latch = map.scene.getObjectByName('Cerrojo del portón');
-  const gate = map.specials.gateControl;
-  assert.ok(Math.hypot(latch.position.x - gate.door.pos.x, latch.position.z - gate.door.pos.z) < .2);
-  assert.ok(latch.position.y > 1);
-  gate.setLatch(1);
-  assert.equal(latch.visible, false);
-  gate.reset();
-  assert.ok(latch.visible);
   const start = route(0, 21.6);
   assert.equal(start.destination, 'Caseta 107');
   assert.equal(start.next, 'Sala 103');
@@ -234,10 +254,66 @@ test('guidance identifies the next physical doorway, both stair approaches, and 
   inventory.consume('masterKey');
   inventory.add('boltCutters');
   assert.equal(route(-16, 15).title, 'Abre el portón exterior');
-  assert.equal(route(-16, 15).next, 'Usa las tres piezas');
+  assert.equal(route(-16, 15).next, 'Caja de fusibles');
   guide.reset(); inventory.reset(); locks.masterKey = false;
   assert.equal(route(0, 21.6).next, 'Sala 103');
 }));
+
+test('the gate hardware stays on its leaves and the two colliders follow their hinges through escape and replay', () => withCanvasStub(() => {
+  const map = buildCorridor(stubMaterial), gate = map.specials.gateControl;
+  const { door } = gate, [left, right] = door.pivots;
+  const latch = map.scene.getObjectByName('Cerrojo del portón');
+  const chains = ['Cadena izquierda', 'Cadena derecha'].map(n => map.scene.getObjectByName(n));
+  assert.equal(latch.parent, left.group);
+  assert.equal(chains[0].parent, left.group);
+  assert.equal(chains[1].parent, right.group);
+  const position = mesh => mesh.getWorldPosition(new Vector3());
+  const seated = position(latch);
+  setGateOpenVisual(door, 1);
+  assert.equal(door.open, 0);
+  gate.setLockVisual('boltCutters', true);
+  assert.ok(chains[0].rotation.z < -.9 && chains[1].rotation.z > .9);
+  gate.setLatch(1);
+  assert.ok(position(latch).x < seated.x - .30 && latch.visible);
+  door.locked = false;
+  setGateOpenVisual(door, 1);
+  assert.ok(position(latch).distanceTo(seated) > 1 && !door.obstacle.active);
+  for (const p of door.pivots) {
+    const end = p.group.localToWorld(new Vector3(p.closedDirX * p.length, 0, 0));
+    assert.ok(p.obstacle.active && Math.hypot(end.x - p.obstacle.bx, end.z - p.obstacle.bz) < .0001);
+  }
+  gate.reset();
+  assert.ok(door.locked && door.obstacle.active && door.open === 0);
+  assert.ok(position(latch).distanceTo(seated) < .001 && chains.every(c => c.rotation.z === 0));
+}));
+
+test('a silent player stays the target on both sides of the wall-breaking threshold', () => {
+  const wall = { x0: -1.6, x1: 1.6, z0: 2, z1: 2.2 };
+  const hunt = createMonsterHunt({ obstacles: [wall], doors: [], spawn: { x: 0, z: 6, yaw: 0 } });
+  const player = { x: 0, z: -3, cameraY: 1.61, active: true, noiseRadius: 0 };
+  for (const elapsed of [0, 65]) {
+    hunt.reset();
+    const threat = computeEscalation({ elapsed });
+    assert.equal(threat.canBreakWalls, false);
+    let lateral = 0;
+    for (let i = 0; i < 1000 && hunt.state.mode !== 'capture'; i++) {
+      const s = hunt.update(1/60, player, threat);
+      lateral = Math.max(lateral, Math.abs(s.x));
+      assert.equal(s.smashedWall, null);
+      assert.notEqual(s.mode, 'patrol');
+      if (s.z >= 2 && s.z <= 2.2) assert.ok(Math.abs(s.x) > 1.6);
+    }
+    assert.ok(lateral > 1.6 && wall.active !== false);
+    assert.equal(hunt.state.mode, 'capture');
+  }
+  hunt.reset();
+  const chase = computeEscalation({ elapsed: 112 });
+  assert.equal(chase.stage, 2);
+  assert.ok(chase.canBreakWalls);
+  let impact = false;
+  for (let i = 0; i < 600 && !impact; i++) impact = Boolean(hunt.update(1/60, player, chase).smashedWall);
+  assert.ok(impact && wall.active === false);
+});
 
 test('an acquired target changes the charge heading mid-pursuit, including beyond a second wall', () => {
   const walls = [-2, -5].map(z => ({ x0: -3.6, x1: 3.6, z0: z - .13, z1: z + .13 }));
@@ -250,7 +326,7 @@ test('an acquired target changes the charge heading mid-pursuit, including beyon
   const breaches = [];
   for (let i = 0; i < 600 && hunt.state.mode !== 'capture'; i++) {
     const before = { x: hunt.state.x, z: hunt.state.z };
-    const s = hunt.update(1/60, player, { lostTimeout: .1 });
+    const s = hunt.update(1/60, player, { ...computeEscalation({ elapsed: 112 }), lostTimeout: .1 });
     const dx = player.x - before.x, dz = player.z - before.z;
     assert.ok(Math.abs((s.x-before.x)*dz - (s.z-before.z)*dx) < 1e-4);
     if (s.smashedWall) {
@@ -263,7 +339,7 @@ test('an acquired target changes the charge heading mid-pursuit, including beyon
   assert.ok(Math.abs(breaches[0]+2) < .2 && Math.abs(breaches[1]+5) < .2);
 });
 
-test('the live hunt walks after an unseen silent player and breaks walls on the moving contact frame', () => {
+test('Cacería follows an unseen silent player and breaks walls on the moving contact frame', () => {
   for (const hz of [30, 120]) {
     const walls = [5, -1].map(z => ({ x0: -7, x1: 7, z0: z, z1: z + .18 }));
     const hunt = createMonsterHunt({ obstacles: walls, doors: [], spawn: { x: 0, z: 12, yaw: 0 } });
@@ -272,7 +348,7 @@ test('the live hunt walks after an unseen silent player and breaks walls on the 
     let hits = 0;
     for (let frame = 0; frame < hz * 20 && hunt.state.mode !== 'capture'; frame++) {
       const before = { x: hunt.state.x, z: hunt.state.z, phase: hunt.state.stridePhase };
-      const s = hunt.update(dt, target);
+      const s = hunt.update(dt, target, computeEscalation({ elapsed: 112 }));
       if (frame === 0) {
         assert.equal(s.visible, false);
         assert.equal(s.animation, 'walk');
@@ -306,14 +382,14 @@ test('the locked exit withstands a moving contact and the hunt immediately follo
     spawn: { x: 0, z: 8, yaw: Math.PI } });
   const target = { x: 0, z: 1, cameraY: 1.61, active: true };
   for (let i = 0; i < 180; i++) {
-    const state = hunt.update(1/60, target);
+    const state = hunt.update(1/60, target, computeEscalation({ elapsed: 112 }));
     assert.equal(state.smashedWall, null);
     assert.ok(state.z >= barrier.z1 + .53 - .001);
   }
   assert.notEqual(barrier.active, false);
   const z = hunt.state.z;
   target.x = 4; target.z = 8;
-  assert.ok(hunt.update(1/60, target).z > z);
+  assert.ok(hunt.update(1/60, target, computeEscalation({ elapsed: 112 })).z > z);
 });
 
 test('a deliberate decoy diverts the walking hunt, then the player immediately becomes its target again', () => {
@@ -388,7 +464,7 @@ test('Point of No Return blacks out lights, tints sky crimson, and enables relen
   assert.ok(openHunt);
 }));
 
-test('animated cutscenes drive intro slam, expanded exterior escape, dawn complete ending, and 3:00 defeat', () => {
+test('animated cutscenes introduce the locked gate, expanded exterior escape, dawn complete ending, and 3:00 defeat', () => {
   const camera = new PerspectiveCamera(64, 1.5, 0.05, 200);
   const door = {
     id: 'porton',
@@ -433,20 +509,21 @@ test('animated cutscenes drive intro slam, expanded exterior escape, dawn comple
     navigation: null
   });
 
-  // 1) Intro cutscene slams gate shut & hands over cleanly
+  // Intro presents the gate already secured.
   let introDone = false;
   cines.startIntro(() => { introDone = true; });
   assert.equal(cines.active, true);
-  assert.ok(door.open > 0.5);
+  assert.equal(door.open, 0);
   const chapters = [];
   for (let i = 0; i < 1800; i++) {
     cines.update(1 / 60, false);
+    assert.equal(door.open, 0);
     if (chapters.at(-1) !== cines.chapter) chapters.push(cines.chapter);
   }
   assert.deepEqual(chapters, ['Portón exterior', 'Caseta 107', 'Bodega 105',
     'Anexo · descanso de la escalera', 'Pasillo principal']);
   assert.equal(introDone, false);
-  assert.equal(slams, 1);
+  assert.equal(slams, 0);
   assert.ok(cines.awaitingStart);
   assert.ok(cines.skip());
   assert.equal(introDone, true);
@@ -466,7 +543,7 @@ test('animated cutscenes drive intro slam, expanded exterior escape, dawn comple
   assert.equal(escapeOutcome, null);
   cines.update(7, false);
   assert.equal(escapeOutcome, 'escape');
-  assert.equal(slams, 2);
+  assert.equal(slams, 1);
   assert.ok(steps > 0);
   assert.equal(door.open, 0);
   assert.ok(cines.playerPose.z > 30);
@@ -501,9 +578,15 @@ test('preloader async textures and minimalist transparent UI contracts stay inta
   assert.match(html, /id="loader-fill"/);
   assert.match(html, /id="hud-timer"/);
   assert.match(html, /id="mission-route"/);
-  assert.doesNotMatch(html, /id="held-purpose"|id="hud-objectives"|class="inv-slot"/);
-  assert.match(html, /id="inventory"/);
+  assert.doesNotMatch(html, /id="held-purpose"|id="hud-objectives"/);
+  assert.match(html, /id="equip-slots"/);
+  for (const kind of EQUIP_SLOTS) assert.ok(html.includes('id="icon-' + kind + '"'));
+  assert.match(html, /id="sprint" role="progressbar"/);
   assert.match(html, /id="use-btn"/);
+  assert.match(html, /id="content-warning"/);
+  assert.match(html, /luces que parpadean/);
+  assert.match(html, /grito fuerte \(screaming\) cuando pierdes/);
+  assert.match(css, /#content-warning::backdrop/);
   assert.match(html, /id="sprint"/);
   assert.match(html, /id="stick"/);
   assert.match(html, /id="camera-btn"/);

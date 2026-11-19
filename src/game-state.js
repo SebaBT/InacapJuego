@@ -3,13 +3,13 @@ export const POINT_OF_NO_RETURN_SECONDS = 120;
 
 export const KEY_ITEMS = Object.freeze(['fuse', 'masterKey', 'boltCutters']);
 export const LORE_ITEMS = Object.freeze(['tape1', 'tape2', 'tape3']);
-export const TOOL_ITEMS = Object.freeze(['energy', 'decoy', 'flash']);
+export const TOOL_ITEMS = Object.freeze(['energy', 'roid', 'flash']);
 
 export const THREAT_STAGES = [
   { name: 'Acecho', effect: 'La Veladora sigue tus pasos.' },
   { name: 'Alerta', effect: 'Se acerca más rápido.' },
-  { name: 'Cacería', effect: 'Te ve desde más lejos.' },
-  { name: 'Frenesí', effect: 'Corre e ignora los señuelos.' }
+  { name: 'Cacería', effect: 'Ya puede romper muros.' },
+  { name: 'Frenesí', effect: 'Corre sin descanso y rompe todo a su paso.' }
 ];
 
 export const GAME_PHASES = Object.freeze({
@@ -91,9 +91,10 @@ export function computeEscalation({ elapsed = 0, keysCollected = 0, pointOfNoRet
     ? clamp(0.82 + 0.18 * frenzyRatio, 0, 1)
     : clamp(preFrenzyTime * 0.48 + keyRatio * 0.34, 0, 0.82);
 
+  const stage = frenzy ? 3 : level >= .44 ? 2 : level >= .22 ? 1 : 0;
   return {
-    level,
-    stage: frenzy ? 3 : level >= .44 ? 2 : level >= .22 ? 1 : 0,
+    level, stage,
+    canBreakWalls: stage >= 2,
     frenzy,
     frenzyRatio,
     patrolSpeed: frenzy ? 2.85 : 1.18 + 0.92 * level,

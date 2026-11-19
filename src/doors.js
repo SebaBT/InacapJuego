@@ -52,6 +52,27 @@ function getThresholdPushApproach(door, pose, vx, vz, wishVx, wishVz, useWish) {
   return useWish ? Math.max(actualApproach, wishApproach) : actualApproach;
 }
 
+export function poseDoorLeaf(pivot, angle) {
+  if (pivot.group) pivot.group.rotation.y = (pivot.hand ?? 1) * angle;
+  pivot.updateCloser?.(angle);
+  if (pivot.obstacle) {
+    const c = Math.cos(angle);
+    const s = Math.sin(angle);
+    const len = pivot.length ?? 0.98;
+    const pad = pivot.obstacle.halfThick ?? 0.034;
+    const bx = pivot.hx + len * (pivot.closedDirX * c + pivot.swingDirX * s);
+    const bz = pivot.hz + len * (pivot.closedDirZ * c + pivot.swingDirZ * s);
+    pivot.obstacle.ax = pivot.hx;
+    pivot.obstacle.az = pivot.hz;
+    pivot.obstacle.bx = bx;
+    pivot.obstacle.bz = bz;
+    pivot.obstacle.x0 = Math.min(pivot.hx, bx) - pad;
+    pivot.obstacle.x1 = Math.max(pivot.hx, bx) + pad;
+    pivot.obstacle.z0 = Math.min(pivot.hz, bz) - pad;
+    pivot.obstacle.z1 = Math.max(pivot.hz, bz) + pad;
+  }
+}
+
 function getDoorSwingSign(door) {
   return (door?.swingSign ?? 1) < 0 ? -1 : 1;
 }
@@ -372,24 +393,7 @@ export function createDoorController({ doors = [], switches = [], atmosphere = n
     for (const pivot of door.pivots || []) {
       const maxAngle = pivot.maxAngle ?? 1.74;
       const angle = swingSign * (eased * maxAngle + bounceOffset) + rattleOffset;
-      pivot.group.rotation.y = (pivot.hand ?? 1) * angle;
-      pivot.updateCloser?.(angle);
-      if (pivot.obstacle) {
-        const c = Math.cos(angle);
-        const s = Math.sin(angle);
-        const len = pivot.length ?? 0.98;
-        const pad = pivot.obstacle.halfThick ?? 0.034;
-        const bx = pivot.hx + len * (pivot.closedDirX * c + pivot.swingDirX * s);
-        const bz = pivot.hz + len * (pivot.closedDirZ * c + pivot.swingDirZ * s);
-        pivot.obstacle.ax = pivot.hx;
-        pivot.obstacle.az = pivot.hz;
-        pivot.obstacle.bx = bx;
-        pivot.obstacle.bz = bz;
-        pivot.obstacle.x0 = Math.min(pivot.hx, bx) - pad;
-        pivot.obstacle.x1 = Math.max(pivot.hx, bx) + pad;
-        pivot.obstacle.z0 = Math.min(pivot.hz, bz) - pad;
-        pivot.obstacle.z1 = Math.max(pivot.hz, bz) + pad;
-      }
+      poseDoorLeaf(pivot, angle);
     }
     if (door.leverPivots && door.leverPivots.length) {
       let leverAngle = 0;

@@ -1,5 +1,5 @@
 import {
-  BoxGeometry, CylinderGeometry, ExtrudeGeometry, Float32BufferAttribute, Group,
+  BoxGeometry, ConeGeometry, CylinderGeometry, ExtrudeGeometry, Float32BufferAttribute, Group,
   Mesh, PlaneGeometry, Shape, SphereGeometry, TorusGeometry, Vector3
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -8,12 +8,11 @@ import { canvasTexture } from './textures.js';
 const steel = 0xb9c5c6, rubber = 0x232d30, brass = 0xe6ae42, ivory = 0xf2edda;
 const up = new Vector3(0, 1, 0);
 
-// The Mii's resting hand is a closed ball. Replace its skin at the wrist
-// while carrying, so the thumb and fingertips wrap around the actual handle.
+// Grip used by the alternate Switch rig. StreetPass carries props with its native mitten.
 export function createCarryingHand(makeMaterial, white) {
   const mat = makeMaterial(white, { emission: .19 });
-  const root = new Group(), fingers = new Group(), sleeve = new Group();
-  root.add(fingers, sleeve);
+  const root = new Group(), fingers = new Group();
+  root.add(fingers);
   function form(parent, geo, tint, x, y, z) {
     const rgb = [tint >> 16, (tint >> 8) & 255, tint & 255].map(v => v / 255);
     const colors = new Float32Array(geo.attributes.position.count * 3);
@@ -42,49 +41,15 @@ export function createCarryingHand(makeMaterial, white) {
   pad(root,-.004,.031,-.007, .014,.012,.020,-.34);
   const wrist = pad(root, .055,-.052,-.004, .030,.042,.027,.58);
   wrist.rotation.x = -.25;
-  const elbow = new Vector3(.158, -.228, .19), cuff = new Vector3(.062, -.065, .009);
-  const axis = elbow.clone().sub(cuff), center = cuff.clone().lerp(elbow, .5);
-  const cloth = form(sleeve, new CylinderGeometry(.060,.034,axis.length(),14),
-    0xb33a38, center.x,center.y,center.z);
-  cloth.quaternion.setFromUnitVectors(up,axis.normalize());
-  const hem = form(sleeve,new CylinderGeometry(.036,.034,.023,14),0x702e30,cuff.x,cuff.y,cuff.z);
-  hem.quaternion.copy(cloth.quaternion);
-  // The StreetPass body has separate hands and no arm mesh. In third person
-  // its sleeve has to connect the animated shoulder to the actual cuff.
-  const arm = new Group();
-  root.add(arm);
-  const shirt = 0xbc3937;
-  const upper = form(arm, new CylinderGeometry(.060,.073,1,14),shirt,0,0,0);
-  const lower = form(arm, new CylinderGeometry(.035,.058,1,14),shirt,0,0,0);
-  const joint = pad(arm,0,0,0,.059,.058,.059,0,shirt);
-  const start = new Vector3(), bend = new Vector3(), along = new Vector3();
-  function segment(mesh, a, b) {
-    along.subVectors(b, a);
-    mesh.position.lerpVectors(a, b, .5);
-    mesh.scale.y = Math.max(.001, along.length());
-    mesh.quaternion.setFromUnitVectors(up, along.normalize());
-  }
-  function reachShoulder(shoulder) {
-    arm.visible = Boolean(shoulder);
-    if (!shoulder) return;
-    arm.worldToLocal(start.copy(shoulder));
-    bend.lerpVectors(start, cuff, .52);
-    bend.y -= .095;
-    bend.z -= .04;
-    segment(upper, start, bend);
-    segment(lower, bend, cuff);
-    joint.position.copy(bend);
-  }
-  arm.visible = false;
-  return { root, sleeve, reachShoulder, fit(kind) {
-    const wide = kind === 'energy' || kind === 'decoy' || kind === 'flash';
+  return { root, fit(kind) {
+    const wide = kind === 'energy' || kind === 'roid' || kind === 'flash';
     fingers.position.z = wide ? .017 : 0;
     root.position.x = wide ? .008 : 0;
   } };
 }
 
 // Local metres, with the origin at the grip and the printed face toward +Z.
-// Floor pickups, the student's hand and thrown alarms share the same geometry.
+// Floor pickups and the student's hand share the same geometry.
 export function createItemModels(makeMaterial, white) {
   const solid = makeMaterial(white, { emission: .46, shininess: .35 });
   const metal = makeMaterial(white, { emission: .48, shininess: .86 });
@@ -167,23 +132,22 @@ export function createItemModels(makeMaterial, white) {
       stamp('VOLTA',0,.053,.040,.057,.021,'#f7fadc','#087c73');
       plate([[-.003,.036],[.010,.036],[.002,.020],[.012,.020],[-.010,-.001],[-.004,.015],[-.012,.015]],
         .001,.039,0xffe56b,lamp);
-    } else if (kind === 'decoy') {
-      drum(0,.059,0,.061,.061,.054,0xd27324,metal).rotation.x = Math.PI/2;
-      drum(0,.059,.030,.055,.055,.007,ivory).rotation.x = Math.PI/2;
-      ring(0,.059,.034,.054,.004,brass);
-      for (let i=0;i<12;i++) {
-        const a = i*Math.PI/6;
-        box(Math.sin(a)*.044,.059+Math.cos(a)*.044,.036,.003,.008,.003,rubber).rotation.z = -a;
-      }
-      rod(0,.059,-.018,.074,.039,.003,rubber);
-      rod(0,.059,.013,.092,.039,.002,0xab3023);
-      for (const s of [-1,1]) {
-        rod(s*.03,.108,s*.043,.134,0,.004,steel,metal);
-        drum(s*.044,.134,0,.008,.029,.021,0xe48224,metal).rotation.z = -s*.48;
-        rod(s*.03,.014,s*.042,-.01,0,.005,rubber);
-      }
-      rod(0,.116,.003,.142,0,.003,steel,metal);
-      box(.003,.142,0,.024,.009,.013,rubber);
+    } else if (kind === 'roid') {
+      // Aerosol can: pale body, dark shoulder and a forward nozzle with a red
+      // trigger, so it reads as a spray even at pickup distance.
+      drum(0, .046, 0, .033, .033, .128, 0xd9e7cd, metal);
+      drum(0, -.020, 0, .033, .029, .012, 0x4b5b47, metal);
+      drum(0, .112, 0, .030, .033, .012, 0x4b5b47, metal);
+      drum(0, .124, 0, .023, .029, .016, 0x36702f, metal);
+      drum(0, .135, 0, .010, .014, .014, 0xc8d5c1, metal);
+      box(0, .141, .018, .018, .016, .040, 0x2b352d, metal);
+      drum(0, .141, .043, .007, .010, .012, 0x1d251e, metal).rotation.x = Math.PI / 2;
+      drum(0, .141, .052, .004, .006, .006, 0xa9ff7a, lamp);
+      box(0, .126, .031, .026, .006, .020, 0x2b352d, metal);
+      box(0, .119, .022, .021, .007, .015, 0xc4402e);
+      ring(0, .008, 0, .0335, .0035, 0xe3bd4d).rotation.x = Math.PI / 2;
+      stamp('ROID', 0, .064, .034, .050, .021, '#f7ffe9', '#2f7a39');
+      part(new ConeGeometry(.009, .018, 3), 0, .026, .035, 0x2f7a39);
     } else if (kind === 'flash') {
       box(0,.032,0,.064,.113,.043,rubber);
       for (const y of [.008,.022,.036]) box(0,y,.023,.053,.004,.005,0x586769);

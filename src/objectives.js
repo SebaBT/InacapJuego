@@ -1,4 +1,4 @@
-import { landing, plaza, stairs } from './layout.js';
+import { gateFixtures, landing, plaza, stairs } from './layout.js';
 import { ITEM_CATALOG, WORLD_ITEM_PLACEMENTS } from './items.js';
 
 const order = ['masterKey', 'fuse', 'boltCutters'];
@@ -64,13 +64,15 @@ export function createObjectiveGuide(nav) {
   function update(pose, inventory, locks) {
     const kind = order.find(k => !locks[k] && !inventory.has(k));
     const def = ITEM_CATALOG[kind];
-    const site = kind ? WORLD_ITEM_PLACEMENTS.find(p => p.kind === kind) : plaza.exteriorGate;
+    const nextLock = order.find(k => !locks[k]);
+    const fixture = gateFixtures[nextLock];
+    const site = kind ? WORLD_ITEM_PLACEMENTS.find(p => p.kind === kind) : fixture ?? plaza.exteriorGate;
     const area = nav.areaAt(pose)?.id;
     const title = kind ? 'Busca ' + ({ masterKey: 'la llave maestra', fuse: 'el fusible', boltCutters: 'el cortapernos' })[kind]
       : 'Abre el portón exterior';
     const destination = kind ? def.location : 'Plaza · portón exterior';
     let goal = { x: site.x, z: kind ? site.z : site.z - 1, area: nav.areaAt(site)?.id ?? 'plaza',
-      label: kind ? 'Recoge ' + def.short.toLowerCase() : 'Usa las tres piezas' };
+      label: kind ? 'Recoge ' + def.short.toLowerCase() : fixture?.label ?? 'Portón exterior' };
     if (kind === 'boltCutters' && area === 'anexo' && !(pose.z < landing.z1 && pose.x < landing.x1 + .1)) {
       const stairX = (stairs.x0 + stairs.x1) / 2;
       const onStairs = pose.x >= stairs.x0 && pose.x <= stairs.x1 && pose.z < stairs.startZ + 1.1;

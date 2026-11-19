@@ -218,7 +218,7 @@ test('the shader and CSS read the same clear-centre mask and hard pause gate', (
   const mainSrc = fs.readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
   assert.match(mainSrc, /createScreenFx\(game\)/);
   assert.match(mainSrc, /running: walk\.active && !previewing/);
-  assert.match(mainSrc, /renderer\.draw\(scene, camera, screenFxFrame\)/);
+  assert.match(mainSrc, /renderer\.draw\(scene, camera, screenFxFrame, playerBody\.visibleHeadSurfaces\)/);
 });
 
 test('fear spikes on eye contact, spares the far and honours authored fear', () => {

@@ -47,7 +47,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
   let route, plannedGoal, crossing, patrolIndex, replanIn, lostTime, searchTime, searchYaw, cryCooldown, searchGoal;
   let crossingGrace, growlCooldown, slamDoor;
   let throwCheck, throwCooldown, throwProp, clearing, throwOrigin, pickupSpot;
-  let stunTime = 0, activeThreat = resolveThreat(null);
+  let stunTime = 0, fleeTime = 0, fleeRetarget = 0, fleeGoal = null, activeThreat = resolveThreat(null);
   let activePlayer = null;
   function resolveThreat(threat = null) {
     return {
@@ -60,6 +60,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       crossingSpeedMult: threat?.crossingSpeedMult ?? 1,
       throwCooldownMult: threat?.throwCooldownMult ?? 1,
       frenzy: Boolean(threat?.frenzy),
+      canBreakWalls: Boolean(threat?.canBreakWalls || threat?.frenzy),
       decoy: threat?.decoy ?? null
     };
   }
@@ -73,12 +74,12 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       throwing: false, throwTime: 0, throwTotal: throwDuration, throwYaw: spawn.yaw, throwSide: 1,
       throwFacingYaw: spawn.yaw, throwPropId: null, throwPlan: null,
       throwPose: null, carry: null, impact: 0, impactDone: false, released: false,
-      stunned: 0, frenzy: false, smashedWall: null, smashedProp: null, smashedDecoy: null });
+      stunned: 0, fleeing: 0, frenzy: false, smashedWall: null, smashedProp: null, smashedDecoy: null });
     route = []; plannedGoal = crossing = null;
     patrolIndex = 0; replanIn = lostTime = searchTime = cryCooldown = crossingGrace = growlCooldown = 0;
     searchGoal = null; slamDoor = null;
     throwCheck = throwCooldown = 0; throwProp = null; clearing = 0; throwOrigin = pickupSpot = null;
-    stunTime = 0; activeThreat = resolveThreat(null);
+    stunTime = fleeTime = 0; fleeRetarget = 0; fleeGoal = null; activeThreat = resolveThreat(null);
     activePlayer = null;
     holdDoor(null);
     furniture?.reset();
@@ -119,6 +120,33 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     route = [];
     plannedGoal = null;
     if (prev <= 0) state.scream = 'stun';
+    return true;
+  }
+  // The Roid spray does not lure the hunt: it burns its eyes and nose and sends
+  // the suit running away from the player for a few seconds. The state is not a
+  // stun, so the body keeps moving at full speed until the panic wears off.
+  function repel(duration = 5.2) {
+    if (state.mode === 'capture' || state.mode === 'dead') return false;
+    fleeTime = Math.max(fleeTime, Math.max(.8, duration));
+    state.fleeing = fleeTime;
+    state.mode = 'flee';
+    state.scream = 'stun';
+    state.stunned = 0;
+    stunTime = 0;
+    releaseThrow();
+    if (crossing) {
+      crossing = null;
+      state.fold = 0;
+      state.doorPress = 0;
+      holdDoor(null);
+    }
+    slamDoor = null;
+    route = [];
+    plannedGoal = null;
+    fleeGoal = null;
+    fleeRetarget = 0;
+    lostTime = 0;
+    searchGoal = null;
     return true;
   }
   reset();
@@ -290,8 +318,9 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     growlCooldown -= dt;
     if (growlCooldown > 0 || state.scream) return;
     if (state.speed > .05 || state.mode === 'chase' ||
-      state.mode === 'investigate' || state.mode === 'search') {
+        state.mode === 'investigate' || state.mode === 'search' || state.mode === 'flee') {
       state.growl = state.mode === 'chase' ? 'snarl'
+        : state.mode === 'flee' ? 'rasp'
         : (state.mode === 'investigate' || state.mode === 'search') ? 'rasp' : 'prowl';
       growlCooldown = state.mode === 'chase' ? 1.4 : 2.3;
     }
@@ -382,22 +411,29 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       plannedGoal = point(goal);
       replanIn = activeThreat.frenzy ? .16 : .24;
     }
-    const next = route[0];
+    let next = route[0];
+    if (!next && tracksPlayer && goal && nav.sameArea(state, goal)) {
+      // A temporarily blocked aisle still permits walking up to the obstruction.
+      const hit = nav.firstHit(state, goal, .53, state.y);
+      next = { x: state.x + (goal.x - state.x) * hit.t, z: state.z + (goal.z - state.z) * hit.t };
+    }
     if (!next) return true;
     if (next.portal) {
       return passDoor(next, goal, dt);
     }
     const angle = Math.atan2(next.x - state.x, next.z - state.z);
-    const chasing = state.mode === 'chase';
-    state.yaw = turn(state.yaw, angle, dt * (chasing ? 6.8 : 3.9));
+    const urgent = state.mode === 'chase' || state.mode === 'flee';
+    state.yaw = turn(state.yaw, angle, dt * (urgent ? 6.8 : 3.9));
     const facing = Math.max(.1, Math.cos(shortestAngleDiff(state.yaw, angle)));
-    const speed = chasing ? activeThreat.chaseSpeed
+    const speed = state.mode === 'flee' ? activeThreat.chaseSpeed * 1.14
+      : tracksPlayer && !activeThreat.canBreakWalls ? Math.min(2.05, activeThreat.patrolSpeed + .30)
+      : urgent ? activeThreat.chaseSpeed
       : state.mode === 'patrol' ? activeThreat.patrolSpeed : activeThreat.investigateSpeed;
     if (moveToward(next, speed * facing, dt)) route.shift();
     return route.length === 0;
   }
   function beginSearch() {
-    if (activeThreat.frenzy) {
+    if (tracksPlayer || activeThreat.frenzy) {
       state.mode = 'chase';
       plannedGoal = null;
       return;
@@ -570,6 +606,57 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     state.animation = 'idle';
     return state;
   }
+  function updateFlee(dt, p) {
+    fleeTime = Math.max(0, fleeTime - dt);
+    fleeRetarget = Math.max(0, fleeRetarget - dt);
+    state.fleeing = fleeTime;
+    state.stunned = 0;
+    state.speed = 0;
+    cryCooldown -= dt;
+    replanIn -= dt;
+    clearing = Math.max(0, clearing - dt);
+    // Run to the far side of the nearest open floor, opposite the player. The
+    // graph handles corners and doorways; the direct vector keeps the panic
+    // legible, because the suit always breaks away from the player first.
+    let awayX = state.x - p.x, awayZ = state.z - p.z;
+    const away = Math.hypot(awayX, awayZ);
+    if (away < .25) {
+      awayX = -Math.sin(p.yaw || 0);
+      awayZ = -Math.cos(p.yaw || 0);
+    } else {
+      awayX /= away;
+      awayZ /= away;
+    }
+    if (!fleeGoal || fleeRetarget <= 0 || distance(state, fleeGoal) < .9) {
+      const lead = 8.5 + Math.min(6, away * .55);
+      fleeGoal = { x: state.x + awayX * lead, z: state.z + awayZ * lead };
+      plannedGoal = null;
+      route = [];
+      replanIn = 0;
+      fleeRetarget = .85;
+    }
+    if (fleeGoal) travel(fleeGoal, dt);
+    const running = state.speed > 1.9;
+    state.animation = state.speed < .02 ? 'idle' : running ? 'run' : 'walk';
+    const oldBeat = Math.floor(state.stridePhase / Math.PI);
+    state.stridePhase += state.speed * dt * Math.PI / (running ? 1.05 : .72);
+    const beat = Math.floor(state.stridePhase / Math.PI);
+    if (state.speed > .05 && oldBeat !== beat) {
+      state.stomp = (beat % 2 ? 1 : -1) * (running ? 1 : .7);
+    }
+    emitGrowl(dt);
+    if (fleeTime <= 0) {
+      state.fleeing = 0;
+      fleeGoal = null;
+      state.mode = 'investigate';
+      state.lastKnown = point(p);
+      lostTime = 0;
+      searchGoal = null;
+      plannedGoal = null;
+      route = [];
+    }
+    return state;
+  }
   function update(dt, p, threat = null) {
     activePlayer = p || null;
     activeThreat = resolveThreat(threat);
@@ -600,8 +687,9 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       return state;
     }
     state.stunned = 0;
+    if (fleeTime > 0) return updateFlee(dt, p);
     if (state.throwing) {
-      if (!tracksPlayer && !activeThreat.frenzy) return updateThrow(dt);
+      if (!activeThreat.canBreakWalls) return updateThrow(dt);
       releaseThrow();
     }
     state.speed = 0;
@@ -609,13 +697,15 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     throwCooldown -= dt; throwCheck -= dt;
     clearing = Math.max(0, clearing - dt);
     crossingGrace = Math.max(0, crossingGrace - dt);
+    const previousDecoy = state.lastKnown?.decoyId;
     perceive(p, dt);
+    if (!crossing && previousDecoy !== state.lastKnown?.decoyId) plannedGoal = null;
     if (state.mode === 'capture') return state;
     // A desk or table parked across the chase is picked up and thrown clear
     // instead of leaving the suit planted and staring at the player. A player
     // crouched behind it at close range still counts: the investigation is the
     // chase in all but name once the two are inside a room's length.
-    const charging = tracksPlayer || activeThreat.frenzy;
+    const charging = activeThreat.canBreakWalls;
     if (charging) {
       if (crossing || slamDoor) holdDoor(null);
       crossing = slamDoor = plannedGoal = null;
@@ -740,5 +830,5 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     plannedGoal = null;
     replanIn = 0;
   }
-  return { state, update, reset, stun, navigation: nav, invalidateNavigation };
+  return { state, update, reset, stun, repel, navigation: nav, invalidateNavigation };
 }

@@ -26,7 +26,7 @@ function makeElement() {
   });
 }
 
-function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], onInteract, onStickDirection } = {}) {
+function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], onInteract, onStickDirection, onStartRequest } = {}) {
   const ids = ['game', 'view', 'enter', 'enter-label', 'message', 'stick', 'pause', 'interact-btn', 'crouch-btn', 'jump-btn'];
   const elements = new Map(ids.map(id => ['#' + id, makeElement()]));
   const padRect = { left: 18, top: 230, width: 128, height: 128 };
@@ -43,7 +43,7 @@ function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], on
   });
 
   const camera = new PerspectiveCamera(BASE_FOV);
-  const walk = firstPerson(camera, obstacles, () => {}, { onInteract, onStickDirection });
+  const walk = firstPerson(camera, obstacles, () => {}, { onInteract, onStickDirection, onStartRequest });
   walk.setView(0, 0, 0, 0);
   function key(type, code, repeat = false) {
     const event = Object.assign(new Event(type, { cancelable: true }), { code, repeat });
@@ -66,12 +66,45 @@ function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], on
   }
   return {
     walk, camera, frames, touch,
+    canvas: elements.get('#view'),
     button: elements.get('#crouch-btn'),
     click: (id, detail = 0) => elements.get('#' + id).dispatchEvent(Object.assign(new Event('click'), { detail })),
     down: (code, repeat) => key('keydown', code, repeat),
     up: code => key('keyup', code)
   };
 }
+
+test('the match starts only from the explicit Entrar button, never from a stray canvas click', t => {
+  const { walk, canvas, click } = setupWalk(t, { coarse: false });
+  const pressCanvas = () => canvas.dispatchEvent(Object.assign(new Event('pointerdown', { cancelable: true }), {
+    button: 0, pointerType: 'mouse', pointerId: 1, clientX: 40, clientY: 40
+  }));
+  pressCanvas();
+  assert.equal(walk.active, false, 'clicking the corridor behind the menu must not start');
+  click('enter');
+  assert.equal(walk.active, true);
+  walk.pause();
+  assert.equal(walk.active, false);
+  pressCanvas();
+  assert.equal(walk.active, false, 'clicking the paused scene must not resume by accident');
+  click('enter');
+  assert.equal(walk.active, true, 'the explicit button still starts the match');
+});
+
+test('the content warning can hold the start and then release it from its own button', t => {
+  let requested = 0, allowed = false;
+  const { walk, click } = setupWalk(t, {
+    coarse: false,
+    onStartRequest: () => { requested++; return allowed; }
+  });
+  click('enter');
+  assert.equal(requested, 1);
+  assert.equal(walk.active, false, 'the warning gate must postpone the match');
+  allowed = true;
+  walk.requestStart();
+  assert.equal(requested, 2);
+  assert.equal(walk.active, true, 'the explicit continue request starts the cinematic flow');
+});
 
 test('real movement emits discrete hearing cues while crouch and stationary sprint stay silent', t => {
   const { walk, click, down, up, frames } = setupWalk(t, { reducedMotion: true });

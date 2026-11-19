@@ -198,8 +198,8 @@ export function movePlayer(p, dx, dz, obstacles, footY = 0, bounds = null, playe
 }
 
 export function firstPerson(camera, obstacles, wake, {
-  onBegin, onPause, onInteract, onUseItem, onSelectSlot, onCycleSlot, onSkipCinematic,
-  onStickDirection, isInspecting = () => false, debris = null, audio: customAudio = null
+  onBegin, onPause, onInteract, onUseItem, onSelectSlot, onCycleSlot, onToggleHolster, onSkipCinematic,
+  onStartRequest, onStickDirection, isInspecting = () => false, debris = null, audio: customAudio = null
 } = {}) {
   const game = document.querySelector('#game'), canvas = document.querySelector('#view');
   const enter = document.querySelector('#enter'), label = document.querySelector('#enter-label');
@@ -343,12 +343,11 @@ export function firstPerson(camera, obstacles, wake, {
   function updateHud() {
     stick.classList.toggle('running', touchStick.wantsSprint && stamina.isSprinting);
     if (sprintBar && sprintFill) {
-      const showBar = active && !noclip && stamina.stamina < .98 &&
-        (stamina.hudVisibleTimer > 0 || stamina.isSprinting || stamina.exhausted);
-      sprintBar.classList.toggle('visible', showBar);
-      sprintBar.classList.toggle('exhausted', active && !noclip && stamina.exhausted);
-      const reading = stamina.exhausted ? 'Sin aguante' : 'Aguante ' + Math.ceil(stamina.stamina * 10) * 10 + ' %';
-      if (showBar && sprintFill.textContent !== reading) sprintFill.textContent = reading;
+      sprintBar.classList.toggle('visible', active && !noclip);
+      sprintBar.classList.toggle('exhausted', stamina.exhausted);
+      const percent = Math.round(Math.max(0, Math.min(1, stamina.stamina)) * 100);
+      sprintFill.style.transform = 'scaleX(' + percent / 100 + ')';
+      sprintBar.setAttribute('aria-valuenow', String(percent));
     }
     const showFx = active && !noclip;
     const blinkVal = showFx ? blink.amount * (1 - lastCam.blend) : 0;
@@ -585,6 +584,10 @@ export function firstPerson(camera, obstacles, wake, {
   }
   function begin(event) {
     if (active || enter.disabled) return;
+    // A start gate can show a content warning before the intro. It runs on the
+    // real click so a later "continue" keeps the user gesture needed by the
+    // pointer lock and audio unlock.
+    if (onStartRequest?.(event) === false) return;
     if (event?.pointerType === 'touch') game.classList.add('touch');
     active = true;
     const wasInspecting = isInspecting();
@@ -701,6 +704,12 @@ export function firstPerson(camera, obstacles, wake, {
       onCycleSlot?.(1);
       return;
     }
+    if (active && !noclip && e.code === 'KeyX' && !e.repeat) {
+      e.preventDefault();
+      audio.unlock();
+      onToggleHolster?.();
+      return;
+    }
     if (active && !noclip && /^Digit[1-6]$/.test(e.code) && !e.repeat) {
       e.preventDefault();
       audio.unlock();
@@ -736,15 +745,17 @@ export function firstPerson(camera, obstacles, wake, {
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
-    if (!active) begin(e);
-    else if (cutsceneLock) {
+    // Starting a run (or restarting after an ending) must always be the
+    // explicit Entrar/Continuar button. A stray click on the corridor used to
+    // fall through the transparent menu and begin the match by accident.
+    if (!active) return;
+    if (cutsceneLock) {
       audio.unlock();
       onSkipCinematic?.();
       return;
-    } else {
-      audio.unlock();
-      if (locked && !captured) (onUseItem || onInteract)?.();
     }
+    audio.unlock();
+    if (locked && !captured) (onUseItem || onInteract)?.();
     if (lookId !== null || (!dragMode && e.pointerType !== 'touch')) return;
     lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(lookId);
@@ -1085,6 +1096,7 @@ export function firstPerson(camera, obstacles, wake, {
     setCutsceneLock,
     applyDoorFollow,
     pause,
+    requestStart: () => begin(),
     setView
   };
 }

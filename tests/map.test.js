@@ -9,6 +9,7 @@ import {
   annex, benchZ, extraLights, furnishingBays, hall, hallClearHalfWidth, hallWindows, landing,
   lights, lightX, pairedFixtureOffset, plaza, plazaLights, returnAisleWidth, rooms, stairs, worldBounds
 } from '../src/layout.js';
+import { computeEscalation } from '../src/game-state.js';
 import { makeMascot } from '../src/mascot.js';
 import { capturePose, createMonsterHunt } from '../src/monster-hunt.js';
 import { createMonsterNavigation } from '../src/monster-navigation.js';
@@ -93,6 +94,30 @@ test('La Veladora opens all real passages, folds on the way in and out, and clim
     if (r === annex) assert.equal(heights.size, stairs.count + 1);
     ctrl.reset();
   }
+});
+
+test('the live stalk follows a silent player through a closed classroom door before walls become breakable', () => {
+  const room = rooms[0], door = map.doors.find(d => d.id === room.id);
+  const ctrl = createDoorController({ doors: map.doors, audio: {} });
+  const spawn = { x: hall.halfWidth - 1.9, z: room.doorZ - 2.1, yaw: Math.PI };
+  const hunt = createMonsterHunt({ obstacles: map.obstacles, doors: map.doors,
+    holdDoor: ctrl.holdForMonster, closeDoor: ctrl.closeForMonster, spawn });
+  const p = { x: hall.halfWidth + 3.6, z: room.doorZ, cameraY: .98, active: true, noiseRadius: 0 };
+  for (const elapsed of [0, 65]) {
+    ctrl.reset(); hunt.reset();
+    const threat = computeEscalation({ elapsed });
+    assert.equal(hunt.update(.05, p, threat).visible, false);
+    let passedDoor = false;
+    for (let i = 0; i < 680 && hunt.state.mode !== 'capture'; i++) {
+      ctrl.update(.05, null, false);
+      const s = hunt.update(.05, p, threat);
+      assert.equal(s.smashedWall, null);
+      assert.ok(s.mode === 'chase' || s.mode === 'capture');
+      if (s.fold === 1 && door.open > .98) passedDoor = true;
+    }
+    assert.ok(passedDoor && hunt.state.mode === 'capture');
+  }
+  ctrl.reset();
 });
 
 test('sight and acoustics follow the real classroom opening and moving leaf', () => {

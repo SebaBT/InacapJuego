@@ -153,9 +153,8 @@ export function makePlayerBody(makeMaterial, wake) {
   bodyMaterial.side = FrontSide;
   const headOpaqueMaterial = makeMaterial(weave, { emission: 0.30 });
   headOpaqueMaterial.side = FrontSide;
-  const mosaicMaterial = makeMaterial(weave, { emission: .35, faceMosaic: true });
-  mosaicMaterial.name = 'Mosaico facial';
-  const headMaterials = [headOpaqueMaterial, mosaicMaterial];
+  const headMaterials = [headOpaqueMaterial];
+  let streetHeadSurfaces = null;
 
   const streetpassShadow = makeShadowMesh('Sombra jugador StreetPass', 0.46, 0.46);
   const switchShadows = [
@@ -167,7 +166,8 @@ export function makePlayerBody(makeMaterial, wake) {
   const rigs = {};
   const bonesByStyle = {};
   const headsByStyle = {};
-  const restingHandSkins = {};
+  let switchHandSkin;
+  const nativePalmScale = new Vector3();
   const gripTarget = new Vector3(), gripScale = new Vector3();
   const shoulderRest = new Vector3(), aimWorld = new Vector3(), palmWorld = new Vector3();
   const gripRotation = new Quaternion(), wristRotation = new Quaternion(), tiltRotation = new Quaternion(), gripEuler = new Euler();
@@ -191,11 +191,7 @@ export function makePlayerBody(makeMaterial, wake) {
       clone.name = 'Cabeza Mii';
       clone.visible = false;
       if (style === 'streetpass') {
-        clone.traverse(mesh => {
-          if (!mesh.isMesh) return;
-          if (mesh.name === 'OpaFaceline') mesh.material = mosaicMaterial;
-          else if (mesh.name !== 'OpaHair') mesh.visible = false;
-        });
+        streetHeadSurfaces = ['OpaFaceline', 'OpaNose', 'OpaHair'].map(name => clone.getObjectByName(name)).filter(Boolean);
       }
       clone.scale.setScalar(PLAYER_BODY_CONFIG[style].headScale);
       headBone.add(clone);
@@ -244,26 +240,38 @@ export function makePlayerBody(makeMaterial, wake) {
   }
 
   function poseGrip(bones, hand, pose, camera, blend) {
-    const skin = restingHandSkins[currentStyle];
-    if (skin) skin.geometry.setIndex(hand?.kind && !pose.capture ? skin.carrying : skin.resting);
-    if (!hand?.kind || pose.capture) {
+    const street = currentStyle === 'streetpass';
+    const fp = camera ? 1 - blend : 0;
+    const carrying = Boolean(hand?.kind && !pose.capture);
+    const lensScale = street && camera ? 1 - fp * (1 - Math.min(1, Math.max(.58, camera.aspect))) : 1;
+    if (!street && switchHandSkin) {
+      const { geometry, resting, carryingIndex } = switchHandSkin;
+      geometry.setIndex(carrying ? carryingIndex : resting);
+    }
+    const wrist = street ? bones.handRPs : bones.wrist_r;
+    if (!wrist) return;
+    if (street) {
+      // Preserve the original palm in both views. Its lens-space pose keeps
+      // small items readable and leaves the authored door reach free.
+      bones.handRPg.scale.copy(nativePalmScale).multiplyScalar(pose.capture ? 1 : (1 - .34 * fp) * lensScale);
+    }
+    if (!carrying) {
+      // Empty hands stay exactly where the gait pose put them: the right mitten
+      // hangs at the student's side like the left one instead of floating in
+      // front of the camera as if it still held something.
       if (heldRoot) heldRoot.visible = false;
       return;
     }
-    const street = currentStyle === 'streetpass';
-    const wrist = street ? bones.handRPs : bones.wrist_r;
-    if (!wrist) return;
     heldRoot = hand.root;
     heldRoot.visible = true;
+    hand.replacementHand.visible = !street;
     if (heldRoot.parent !== wrist) wrist.add(heldRoot);
-    heldRoot.position.set(street ? 1 : -3.6, street ? 1.8 : 2, street ? -.5 : 1);
-    const fp = camera ? 1 - blend : 0;
-    hand.sleeve.visible = street && fp > .5;
+    heldRoot.position.set(-3.6, 2, 1);
     if (fp > .001) {
       // Move the actual right hand to the carrying pose. The Switch skeleton
       // reaches with both arm bones; StreetPass has a free, skinned hand.
-      gripTarget.set(Math.min(.245, camera.aspect * .165), -.215 + hand.lift,
-        -.50 - hand.reach).applyQuaternion(camera.quaternion).add(camera.position);
+      gripTarget.set(Math.min(.26, camera.aspect * .205), -.225 + hand.lift * lensScale,
+        -.60 - hand.reach * lensScale).applyQuaternion(camera.quaternion).add(camera.position);
       if (street) {
         wrist.parent.worldToLocal(gripTarget);
         wrist.position.lerp(gripTarget, fp);
@@ -289,7 +297,7 @@ export function makePlayerBody(makeMaterial, wake) {
     }
     wrist.updateWorldMatrix(true, false);
     wrist.getWorldScale(gripScale);
-    heldRoot.scale.set(1 / gripScale.x, 1 / gripScale.y, 1 / gripScale.z);
+    heldRoot.scale.set(lensScale / gripScale.x, lensScale / gripScale.y, lensScale / gripScale.z);
     gripRotation.setFromEuler(gripEuler.set(.04 + hand.tilt, pose.bodyYaw ?? pose.yaw, .24, 'YXZ'));
     if (pose.evidence && camera) gripRotation.slerp(camera.quaternion, pose.evidence);
     if (camera && fp > .001) {
@@ -297,9 +305,14 @@ export function makePlayerBody(makeMaterial, wake) {
         tiltRotation.setFromEuler(gripEuler.set(-.12 + hand.tilt, -.32, .30)));
       gripRotation.slerp(wristRotation, fp);
     }
+    if (street) {
+      // The handle touches the inner, upper edge of the real mitten.
+      wrist.getWorldPosition(palmWorld);
+      gripTarget.set(-.056, .107, .057).multiplyScalar((1 - .26 * fp) * lensScale).applyQuaternion(gripRotation).add(palmWorld);
+      heldRoot.position.copy(wrist.worldToLocal(gripTarget));
+    }
     wrist.getWorldQuaternion(wristRotation);
     heldRoot.quaternion.copy(wristRotation.invert()).multiply(gripRotation);
-    hand.reachShoulder(street && fp <= .5 ? bones.bodyPs.localToWorld(gripTarget.set(-11, 65, 0)) : null);
   }
 
   async function loadStyle(style) {
@@ -319,9 +332,9 @@ export function makePlayerBody(makeMaterial, wake) {
         ? stripSwitchNeckAndCapCollar(obj, { Float32BufferAttribute, Uint16BufferAttribute })
         : -1;
       paintGeometry(obj, style, collarCenterIdx);
-      if (obj.isSkinnedMesh && obj.name === (style === 'streetpass' ? 'hands_m' : 'body_m')) {
+      if (style === 'switch' && obj.isSkinnedMesh && obj.name === 'body_m') {
         const geometry = obj.geometry, resting = geometry.index;
-        const right = obj.skeleton.bones.findIndex(b => b.name === (style === 'streetpass' ? 'handRPg' : 'wrist_r'));
+        const right = obj.skeleton.bones.findIndex(b => b.name === 'wrist_r');
         if (resting && right >= 0) {
           const keep = [], joints = geometry.attributes.skinIndex;
           for (let i = 0; i < resting.count; i += 3) {
@@ -329,7 +342,7 @@ export function makePlayerBody(makeMaterial, wake) {
             if (tri.every(v => joints.getX(v) !== right)) keep.push(...tri);
           }
           geometry.setIndex(keep);
-          restingHandSkins[style] = { geometry, resting, carrying: geometry.index };
+          switchHandSkin = { geometry, resting, carryingIndex: geometry.index };
           geometry.setIndex(resting);
         }
       }
@@ -337,6 +350,7 @@ export function makePlayerBody(makeMaterial, wake) {
       obj.frustumCulled = false;
     });
 
+    if (style === 'streetpass') nativePalmScale.copy(boneMap.handRPg.scale);
     if (style === 'switch') shoulderRest.copy(boneMap.arm_r1.position);
     rigs[style] = model;
     bonesByStyle[style] = boneMap;
@@ -370,7 +384,7 @@ export function makePlayerBody(makeMaterial, wake) {
   function setWireframe(enabled) {
     wireframe = Boolean(enabled);
     bodyMaterial.wireframe = wireframe;
-    for (const mat of headMaterials) mat.wireframe = mat !== mosaicMaterial && wireframe;
+    for (const mat of headMaterials) mat.wireframe = wireframe;
   }
 
   function update(dt, pose, opts = {}) {
@@ -418,8 +432,8 @@ export function makePlayerBody(makeMaterial, wake) {
     if (showHead) {
       const fading = headOpacity < 0.99;
       if (headOpaqueMaterial.transparent !== fading) {
-        headOpaqueMaterial.transparent = mosaicMaterial.transparent = fading;
-        headOpaqueMaterial.needsUpdate = mosaicMaterial.needsUpdate = true;
+        headOpaqueMaterial.transparent = fading;
+        headOpaqueMaterial.needsUpdate = true;
       }
       for (const mat of headMaterials) {
         if (mat.uniforms?.opacity) mat.uniforms.opacity.value = headOpacity;
@@ -499,6 +513,9 @@ export function makePlayerBody(makeMaterial, wake) {
   return {
     root,
     ready,
+    get visibleHeadSurfaces() {
+      return root.visible && currentStyle === 'streetpass' && headsByStyle.streetpass?.visible ? streetHeadSurfaces : null;
+    },
     get style() { return currentStyle; },
     setStyle,
     setWireframe,

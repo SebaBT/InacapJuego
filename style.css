@@ -276,7 +276,13 @@ button:focus-visible { outline: 1px solid var(--ivory); outline-offset: 4px; }
 .touch .desktop-only { display: none; }
 body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 
-/* Gameplay text sits on the scene itself. The center stays clear for aiming. */
+/* Gameplay readouts share a center line; the reticle keeps its own space. */
+.hud-symbols { position: absolute; pointer-events: none; overflow: hidden; }
+.hud-icon {
+  display: block; width: 19px; height: 19px; fill: none; stroke: currentColor;
+  stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; flex: none;
+  filter: drop-shadow(0 1px 2px #101510);
+}
 #hud-status, .equipment, .caption-block, #skip-hint, #interact-btn {
   position: absolute; left: 50%; transform: translateX(-50%); z-index: 4;
   width: max-content; max-width: min(90%, 36rem); text-align: center;
@@ -289,11 +295,14 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 .hud-meta, #mission, #held-readout, #use-btn, #skip-hint {
   display: flex; justify-content: center; align-items: baseline; gap: .55em;
 }
-.hud-meta { font: 500 12px/1.4 var(--mono); letter-spacing: .035em; }
+.hud-meta { align-items: center; gap: 14px; font: 500 12px/1.4 var(--mono); letter-spacing: .035em; }
+.hud-stat { display: inline-flex; align-items: center; gap: 5px; }
+.hud-stat .hud-icon { width: 15px; height: 15px; }
 #hud-clock { font-variant-numeric: tabular-nums; font-weight: 700; }
 #mission { margin-top: 4px; font: 500 13px/1.35 "Segoe UI", sans-serif; }
 #mission-title { font-weight: 650; }
-#bearing-arrow { display: inline-block; align-self: center; font: 18px/1 var(--mono); }
+#bearing-arrow { display: inline-flex; align-self: center; }
+#bearing-arrow .hud-icon { width: 13px; height: 13px; stroke-width: 1.8; }
 #threat-notice { margin: 5px 0 0; font-size: 13px; }
 #threat-notice:empty, #sprint:not(.visible) { display: none; }
 #hud-timer[data-phase="frenzy"] { font-weight: 700; }
@@ -318,12 +327,41 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 #skip-hint kbd, #use-btn kbd { border: 0; background: transparent; padding: 0; font: inherit; opacity: .72; }
 .equipment { bottom: max(12px, env(safe-area-inset-bottom)); font: 500 13px/1.2 var(--mono); }
 :is(.touch,.drag-look) .equipment { bottom: max(43px, calc(env(safe-area-inset-bottom) + 35px)); }
-#sprint { font-size: 11px; line-height: 1.6; }
-#held-readout { gap: .25em; align-items: center; }
-#held-name { font-weight: 600; }
-#equip-prev, #equip-next { min-width: 36px; font-size: 22px; line-height: 1; }
-#use-btn { margin-inline-start: 6px; align-items: center; }
-#skip-hint[hidden], #held-readout[hidden], #use-btn[hidden], .equipment [hidden] { display: none; }
+#sprint { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0 auto 4px; }
+#sprint .hud-icon { width: 17px; height: 17px; }
+.sprint-track {
+  width: clamp(92px, 16vmin, 142px); height: 6px; border: 1px solid rgb(246 244 230 / .76);
+  border-radius: 3px; padding: 1px; box-shadow: 0 1px 4px #111; overflow: hidden;
+}
+#sprint-fill { display: block; width: 100%; height: 100%; background: #f2efdf; transform-origin: left; }
+#sprint.exhausted .hud-icon, #sprint.exhausted .sprint-track { color: #ffc6a2; border-color: currentColor; }
+.adrenaline-active #sprint-fill { background: #c2f0d0; }
+#equip-slots { display: flex; justify-content: center; gap: 4px; }
+#equip-slots .inv-slot {
+  position: relative; display: grid; place-content: center; width: clamp(38px, 7vmin, 48px); height: 44px;
+  padding: 0; color: var(--ivory); border: 1px solid rgb(245 241 222 / .58);
+  border-radius: 4px; box-shadow: 0 1px 3px #0c100dcc;
+}
+.inv-slot .hud-icon { width: 24px; height: 24px; }
+#equip-slots .inv-slot:disabled { opacity: .57; cursor: default; }
+#equip-slots .inv-slot[aria-pressed="true"] { border-color: var(--ivory); box-shadow: inset 0 -3px var(--ivory), 0 1px 3px #101410; }
+#equip-slots .inv-slot.installed { opacity: .76; }
+.slot-key, .slot-count { position: absolute; font: 600 9px/1 var(--mono); }
+.slot-key { top: 3px; left: 4px; }
+.slot-count { right: 3px; bottom: 3px; }
+.touch .slot-key { display: none; }
+#held-readout { gap: 8px; align-items: center; min-height: 20px; margin-top: 3px; }
+#held-name { font: 600 12px/1.2 "Segoe UI", sans-serif; }
+#use-btn { min-height: 30px; align-items: center; font-size: 12px; }
+#holster-btn { min-height: 30px; align-items: center; font-size: 12px; opacity: .82; }
+#holster-btn kbd { border: 0; background: transparent; padding: 0; font: inherit; opacity: .72; }
+.touch #use-btn, .touch #holster-btn { min-height: 44px; }
+#held-readout.hands-free #held-name { opacity: .74; }
+.roid-ready .reticle {
+  color: #cbff9d;
+  text-shadow: 0 0 6px #7dff5e, 0 0 14px #4a9d32;
+}
+#skip-hint[hidden], #held-readout[hidden], #use-btn[hidden], #holster-btn[hidden], .equipment [hidden] { display: none; }
 :is(#skip-hint, #interact-btn, .equipment button, .touch-actions button):focus-visible {
   outline: 1px solid currentColor; outline-offset: 1px;
 }
@@ -403,7 +441,7 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 #game:not(.playing)::after,
 #game.inspecting::before,
 #game.inspecting::after { opacity: 0; }
-#game.captured .reticle, #game.captured .sprint-bar, #game.captured #stick,
+#game.captured .reticle, #game.captured #sprint, #game.captured #stick,
 #game.captured .touch-actions, #game.captured #camera-btn { display: none; }
 .playing #view { cursor: none; }
 .drag-look #view { cursor: grab; }
@@ -417,7 +455,11 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   bottom: max(var(--edge-room), env(safe-area-inset-bottom));
   width: calc(2 * var(--stick-radius)); aspect-ratio: 1; touch-action: none; text-align: center;
 }
-.stick-thumb { position: absolute; inset: 35%; pointer-events: none; font: 24px/1 var(--mono); }
+.stick-thumb {
+  position: absolute; inset: 34%; border: 1px solid currentColor; border-radius: 50%;
+  pointer-events: none; font: 22px/1.4 var(--mono);
+}
+#stick::before { content: ""; position: absolute; inset: 0; border: 1px solid rgb(242 239 223 / .45); border-radius: 50%; }
 .stick-label { position: absolute; bottom: 0; inset-inline: 0; font-size: 12px; pointer-events: none; }
 #stick.running .stick-label { font-size: 0; }
 #stick.running .stick-label::after { content: "Correr"; font-size: 12px; }
@@ -425,8 +467,8 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   bottom: max(21px, env(safe-area-inset-bottom)); right: max(12px, env(safe-area-inset-right));
   justify-items: center; font: 500 12px/1.1 var(--mono);
 }
-.touch-actions button { min-width: 58px; }
-.touch-actions [aria-pressed="true"] { text-decoration: underline; text-underline-offset: 4px; }
+.touch-actions button { display: grid; place-items: center; min-width: 48px; }
+.touch-actions [aria-pressed="true"] { box-shadow: inset 0 -2px currentColor; }
 .playing.touch:not(.in-cutscene):not(.captured) #stick { display: block; }
 .playing.touch:not(.in-cutscene):not(.captured) .touch-actions { display: grid; }
 .play-label { display: none; }
@@ -478,7 +520,7 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   font-size: clamp(14px, 1.4vw, 18px); line-height: 1.45; color: #e2dfce;
 }
 /* The cover keeps its camera control. During play, secondary controls share
-   a centered text row on displays without a locked mouse. */
+   a centered row on displays without a locked mouse. */
 .playing .hud-top { display: none; }
 .playing:is(.touch,.drag-look):not(.captured):not(.in-cutscene):not(.inspecting) .hud-top {
   display: flex; justify-content: center; gap: 10px; left: 50%; right: auto; top: auto;
@@ -489,11 +531,11 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   border: 0; border-radius: 0; color: var(--ivory); box-shadow: none; filter: none;
   font: 500 11px/1.2 var(--mono); text-shadow: 0 1px 4px #101310;
 }
-.playing .hud-top :is(svg,kbd,.camera-label) { display: none; }
-.playing .hud-top .play-label { display: inline; }
+.playing .hud-top :is(kbd,.camera-label) { display: none; }
+.playing .hud-top svg { display: block; margin: auto; width: 20px; height: 20px; }
 @media (max-width: 600px) and (orientation: portrait) {
-  .touch .equipment { bottom: max(139px, calc(env(safe-area-inset-bottom) + 127px)); }
-  .playing.touch:not(.in-cutscene) .caption-block { bottom: max(206px, 28%); }
+  .touch .equipment { bottom: max(128px, calc(env(safe-area-inset-bottom) + 118px)); }
+  .playing.touch:not(.in-cutscene) .caption-block { bottom: max(245px, 31%); }
 }
 @media (max-height: 500px) {
   #hud-status { top: max(6px, env(safe-area-inset-top)); }
@@ -521,6 +563,61 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 @media (prefers-reduced-motion: reduce) {
   #loader { transition: none; }
   .loader-mark { animation: none; }
+}
+
+#content-warning {
+  width: min(34rem, calc(100vw - 2rem));
+  padding: 1.45rem 1.55rem 1.3rem;
+  border: 1px solid rgb(242 239 223 / .34);
+  border-radius: 3px;
+  background: #101512f7;
+  color: var(--ivory);
+  box-shadow: 0 24px 70px #000;
+  font: 500 14px/1.55 "Segoe UI", Arial, sans-serif;
+}
+#content-warning::backdrop { background: rgb(3 6 5 / .84); }
+#content-warning .warning-kicker {
+  margin: 0 0 .55rem;
+  color: var(--amber);
+  font: 600 10px/1.2 var(--mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+}
+#content-warning h2 {
+  margin: 0 0 .65rem;
+  font: 400 clamp(1.9rem, 4vw, 2.7rem)/1.02 var(--display);
+  letter-spacing: -.03em;
+}
+#content-warning p { margin: 0; text-wrap: pretty; }
+#content-warning strong { color: #ffd88a; font-weight: 650; }
+#content-warning .warning-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 1.25rem;
+}
+#content-warning button {
+  min-height: 40px;
+  padding: 0 .95rem;
+  border: 1px solid rgb(242 239 223 / .42);
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: 600 12px/1 var(--mono);
+  letter-spacing: .02em;
+  cursor: pointer;
+}
+#content-warning button:hover { border-color: var(--ivory); }
+#content-warning #warning-continue {
+  border-color: var(--amber);
+  background: rgb(243 200 108 / .13);
+  color: #fff4cf;
+}
+#content-warning button:focus-visible { outline: 1px solid currentColor; outline-offset: 2px; }
+@media (max-width: 520px) {
+  #content-warning { padding: 1.15rem 1.1rem 1rem; }
+  #content-warning .warning-actions { flex-direction: column-reverse; }
+  #content-warning button { width: 100%; }
 }
 
 #debug {

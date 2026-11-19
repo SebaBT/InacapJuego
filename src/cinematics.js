@@ -1,3 +1,4 @@
+import { poseDoorLeaf } from './doors.js';
 import { monsterSpawn, playerSpawn, plaza } from './layout.js';
 import { ITEM_CATALOG, WORLD_ITEM_PLACEMENTS } from './items.js';
 import { capturePose } from './monster-hunt.js';
@@ -22,23 +23,12 @@ function lerpYaw(a, b, t) {
 
 export function setGateOpenVisual(door, openAmount) {
   if (!door) return;
-  const open = clamp(openAmount, 0, 1);
-  door.open = open;
-  door.targetOpen = open;
-  const eased = open * open * (3 - 2 * open);
-  const sign = door.swingSign ?? 1;
+  const open = door.locked ? 0 : clamp(openAmount, 0, 1);
+  door.open = door.targetOpen = open;
   for (const pivot of door.pivots || []) {
-    if (pivot.group?.rotation) {
-      pivot.group.rotation.y = (pivot.hand ?? 1) * sign * eased * (pivot.maxAngle ?? 1.58);
-      pivot.group.updateMatrixWorld?.(true);
-    }
-    if (pivot.obstacle) {
-      pivot.obstacle.active = open < 0.35;
-    }
+    poseDoorLeaf(pivot, (door.swingSign ?? 1) * smooth(open) * (pivot.maxAngle ?? 1.58));
   }
-  if (door.obstacle) {
-    door.obstacle.active = door.locked || open < 0.35;
-  }
+  if (door.obstacle) door.obstacle.active = open < .72;
 }
 
 function lookYaw(fromX, fromZ, toX, toZ) {
@@ -160,7 +150,7 @@ export function createCinematics({
       noclip: true
     };
     walk.setCutsceneLock?.(true);
-    setGateOpenVisual(gateControl?.door, 0.78);
+    setGateOpenVisual(gateControl?.door, 0);
     actor.place(monsterSpawn.x, 0, monsterSpawn.z, 0);
     actor.setAnimation('idle');
     actor.face.reset?.();
@@ -186,7 +176,7 @@ export function createCinematics({
     if (gateControl?.door) {
       gateControl.door.locked = false;
     }
-    setGateOpenVisual(gateControl?.door, 0.05);
+    setGateOpenVisual(gateControl?.door, 0);
     actor.place(-16.0, 0, 14.5, 0);
     actor.setAnimation('idle');
     actor.face.setExpression('chase');
@@ -285,10 +275,7 @@ export function createCinematics({
   function updateIntro(dt, reducedMotion) {
     const t = elapsed;
     if (t < 5.5) {
-      const shut = smooth((t - 1.3) / 1.15);
-      setGateOpenVisual(gateControl?.door, .78 * (1 - shut));
-      if (!gateSlammed && shut > .97) { gateSlammed = true; doorAudio?.playSlam?.(gateControl?.door); }
-      frameShot(-16.9, 1.52, 15.9 + (reducedMotion ? 0 : .42 * smooth(t / 5.5)), -16, 1.36, 19.6, 62);
+      frameShot(-16.48, 1.52, 16.9 + (reducedMotion ? 0 : .28 * smooth(t / 5.5)), -16, 1.34, 19.6, 57);
       fade = dissolve(t, 5.5);
     } else if (t < 22) {
       setGateOpenVisual(gateControl?.door, 0);
@@ -319,10 +306,10 @@ export function createCinematics({
   function updateEscape(dt, reducedMotion) {
     const t = elapsed, gx = plaza.exteriorGate.x, gz = plaza.exteriorGate.z;
     // Release the bolt, run through, then drop the gate between the two bodies.
-    const opening = smooth((t - .55) / 1.45);
+    const opening = smooth((t - .65) / 1.35);
     const closing = smooth((t - 4.45) / .68);
     setGateOpenVisual(gateControl?.door, opening * (1 - closing));
-    gateControl?.setLatch?.(smooth(t / .65) * (1 - smooth((t - 5.1) / .32)));
+    gateControl?.setLatch?.(smooth(t / .65) * (1 - smooth((t - 5.13) / .32)));
     if (!gateSlammed && t >= 5.13) {
       gateSlammed = true;
       doorAudio?.playSlam?.(gateControl?.door);

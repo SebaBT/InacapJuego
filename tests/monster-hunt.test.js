@@ -456,3 +456,28 @@ test('a crouched player pressed against a crate is grabbed at arm’s length, ne
   }
   assert.ok(grabbed >= 0, 'the suit never grabbed the body it was leaning over');
 });
+test('Roid sends the hunt running away from the sprayed player, then the chase resumes', () => {
+  const hunt = createMonsterHunt({ spawn: { x: 0, z: 0, yaw: 0 }, obstacles: [], doors: [] });
+  const p = player(0, 5);
+  const s = hunt.state;
+  for (let i = 0; i < 12; i++) hunt.update(dt, p);
+  assert.equal(s.mode, 'chase');
+  const before = Math.hypot(s.x - p.x, s.z - p.z);
+
+  assert.equal(hunt.repel(4.2), true);
+  assert.equal(s.mode, 'flee');
+  assert.ok(s.fleeing > 4, 'the panic clock starts immediately');
+
+  let furthest = before;
+  for (let i = 0; i < 90; i++) {
+    hunt.update(dt, p);
+    furthest = Math.max(furthest, Math.hypot(s.x - p.x, s.z - p.z));
+    assert.notEqual(s.mode, 'capture');
+  }
+  assert.ok(furthest > before + .45, 'the hunt did not break away from the player');
+  assert.equal(s.animation, 'run');
+
+  for (let i = 0; i < 220; i++) hunt.update(dt, p);
+  assert.notEqual(s.mode, 'flee');
+  assert.equal(s.fleeing, 0);
+});

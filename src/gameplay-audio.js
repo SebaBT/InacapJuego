@@ -127,14 +127,18 @@ export function makeGameplayAudio(sound = soundState, { AudioContext: CustomAudi
     tone('sine', 240, 680, 0.36, 0.07, 0.10);
   }
 
-  function playDecoyThrow() {
-    tone('triangle', 340, 180, 0.09, 0.05);
+  function playHolster() {
+    noise(760, 1.2, 0.06, 0.025, 0);
+    tone('triangle', 280, 190, 0.07, 0.026, 0.01);
   }
 
-  function playDecoyBeep(level = 0.7, pan = 0) {
-    const gain = 0.08 * clamp(level, 0.05, 1);
-    tone('square', 1760, 1740, 0.06, gain, 0, pan);
-    tone('square', 2240, 2200, 0.07, gain * 0.85, 0.08, pan);
+  function playRoidSpray(hit = false) {
+    noise(3200, 0.85, 0.4, 0.075, 0);
+    noise(1500, 0.7, 0.5, 0.04, 0.05);
+    if (hit) {
+      tone('sine', 940, 260, 0.34, 0.045, 0.12);
+      tone('triangle', 220, 130, 0.24, 0.035, 0.2);
+    }
   }
 
   function playFlash() {
@@ -234,9 +238,9 @@ export function makeGameplayAudio(sound = soundState, { AudioContext: CustomAudi
     unlock: ensure,
     playPickup,
     playEquip,
+    playHolster,
     playEnergy,
-    playDecoyThrow,
-    playDecoyBeep,
+    playRoidSpray,
     playFlash,
     playLockInstall,
     playGateOpen,

@@ -15,7 +15,7 @@ import { createDoorController } from './doors.js';
 import { setupDebug } from './debug.js';
 import { bindSoundControl, makeControlledDoorAudio, soundState } from './sound.js';
 import {
-  extraLights, hall, lights, monsterSpawn, playerSpawn, plazaLights, rooms, worldBounds
+  extraLights, gateFixtures, hall, lights, monsterSpawn, playerSpawn, plazaLights, rooms, worldBounds
 } from './layout.js';
 import {
   allGateLocksUnlocked,
@@ -34,15 +34,16 @@ import {
 } from './game-state.js';
 import {
   createBreakableDebris,
-  createDecoyProjectiles,
   createHandViewModel,
   createInventory,
+  createRoidSpray,
   createWorldItems,
-  ITEM_CATALOG, ENERGY_SECONDS, FLASH_SECONDS
+  ITEM_CATALOG, ENERGY_SECONDS, FLASH_SECONDS, ROID_FLEE_SECONDS
 } from './items.js';
 import { createItemModels } from './item-models.js';
 import { createObjectiveGuide } from './objectives.js';
 import { makeGameplayAudio } from './gameplay-audio.js';
+import { createGameMusic } from './music.js';
 import { createCinematics, setGateOpenVisual } from './cinematics.js';
 
 const SUMMARY_ICONS = {
@@ -62,6 +63,7 @@ const status = document.querySelector('#message');
 const interactPrompt = document.querySelector('#interact-prompt');
 const interactBtn = document.querySelector('#interact-btn');
 const useBtn = document.querySelector('#use-btn');
+const holsterBtn = document.querySelector('#holster-btn');
 const skipHint = document.querySelector('#skip-hint');
 const cineWhisper = document.querySelector('#cine-whisper');
 const menuCaption = document.querySelector('#menu-context');
@@ -76,8 +78,11 @@ const loaderEl = document.querySelector('#loader');
 const loaderFill = document.querySelector('#loader-fill');
 const loaderPct = document.querySelector('#loader-pct');
 const menuBrief = document.querySelector('#menu-brief');
+const contentWarning = document.querySelector('#content-warning');
+const warningContinue = document.querySelector('#warning-continue');
+const warningBack = document.querySelector('#warning-back');
 const ui = Object.fromEntries(['mission', 'mission-title', 'mission-route', 'bearing-arrow', 'threat-level', 'threat-notice',
-  'held-readout', 'held-name', 'held-action', 'equip-prev', 'equip-next', 'cine-chapter', 'skip-label']
+  'held-readout', 'held-name', 'held-action', 'equip-slots', 'tape-count', 'cine-chapter', 'skip-label']
   .map(id => [id, document.getElementById(id)]));
 function write(el, value) { if (el && el.textContent !== value) el.textContent = value; }
 const hudTimer = document.querySelector('#hud-timer');
@@ -137,9 +142,21 @@ async function start() {
     visible: (p, item) => hunt.navigation.canReach({ x: p.x, y: p.cameraY, z: p.z },
       { x: item.x, y: item.y + .14, z: item.z }) });
   const handView = createHandViewModel({ models, makeMaterial: renderer.material, whiteTex: art.white });
-  const decoys = createDecoyProjectiles({ scene, obstacles, models });
+  const roidSpray = createRoidSpray({ scene });
   const smashDebris = createBreakableDebris({ scene, makeMaterial: renderer.material, whiteTex: art.white });
   const inventory = createInventory();
+  const slotButtons = inventory.slots.map(({ kind }, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'inv-slot';
+    button.dataset.slot = kind;
+    button.innerHTML = `<span class="slot-key" aria-hidden="true">${index + 1}</span>
+      <svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-${kind}"/></svg>
+      <span class="slot-count" aria-hidden="true"></span>`;
+    button.addEventListener('click', () => selectEquipment(index));
+    ui['equip-slots'].append(button);
+    return button;
+  });
   const match = createMatchState();
   setLoadProgress(0.74);
 
@@ -158,6 +175,11 @@ async function start() {
   const atmosphere = createAtmosphere(lights, extraLights);
   const doorAudio = makeControlledDoorAudio(soundState);
   const gameplayAudio = makeGameplayAudio(soundState);
+  const gameMusic = createGameMusic({ sound: soundState });
+  function setMusic(state) {
+    gameMusic.set(state);
+    game.dataset.music = gameMusic.getState().state;
+  }
   const doorCtrl = createDoorController({ doors, switches, atmosphere, audio: doorAudio });
   let hunt;
   const furniture = createFurniture({
@@ -184,6 +206,8 @@ async function start() {
   let threatStage = 0, noticeUntil = 0;
   const targetLocal = new Vector3();
   const torchDir = new Vector3();
+  const roidDir = new Vector3();
+  const roidOffset = new Vector3();
 
   function setWhisper(text, secs = 2.6) {
     transientWhisper = text;
@@ -230,23 +254,63 @@ async function start() {
 
   function syncHud() {
     const equipped = inventory.equipped, def = ITEM_CATALOG[equipped];
-    const canCycle = inventory.slots.filter(slot => slot.count > 0).length > 1;
+    inventory.slots.forEach(({ kind, count, usedOnGate }, i) => {
+      const button = slotButtons[i], item = ITEM_CATALOG[kind];
+      button.disabled = !count;
+      button.classList.toggle('installed', usedOnGate);
+      button.classList.toggle('stowed', Boolean(count) && equipped !== kind);
+      button.setAttribute('aria-pressed', String(equipped === kind));
+      const label = item.label + (usedOnGate ? ' · Instalado' : count ? ' ×' + count : ' · Vacío') +
+        '. ' + item.purpose + (equipped === kind ? ' Pulsa otra vez para guardarlo y dejar las manos libres.' : '');
+      button.title = label;
+      button.setAttribute('aria-label', label);
+      write(button.lastElementChild, usedOnGate ? '✓' : count > 1 ? String(count) : '');
+    });
+    write(ui['tape-count'], inventory.tapesCount + '/' + LORE_ITEMS.length);
     handView.setItem(equipped);
-    ui['held-readout'].hidden = !def;
-    ui['equip-prev'].hidden = ui['equip-next'].hidden = !canCycle;
+    if (ui['held-readout']) ui['held-readout'].hidden = false;
+    ui['held-readout']?.classList.toggle('hands-free', !def);
+    write(ui['held-name'], def ? def.short : 'Manos libres');
+    ui['held-name'].title = def
+      ? def.purpose + ' · X para guardarlo'
+      : 'Tienes las manos libres. Pulsa 1–6 o X para volver a equipar.';
     useBtn.hidden = def?.category !== 'tool';
+    holsterBtn.hidden = !def;
     if (def) {
-      const count = inventory.slots[inventory.selectedIndex].count;
-      write(ui['held-name'], def.label + (count > 1 ? ' ×' + count : ''));
-      ui['held-name'].title = def.purpose;
       write(ui['held-action'], def.action);
       useBtn.setAttribute('aria-label', def.action + '. ' + def.purpose);
+      holsterBtn.setAttribute('aria-label', 'Guardar ' + def.short + ' y dejar las manos libres (X)');
+      holsterBtn.title = 'Guardar ' + def.short + ' · X';
     }
     syncLiveHud();
   }
 
   let walk;
   let cinematics;
+  let contentWarningAcknowledged = false;
+  let contentWarningOpen = false;
+
+  // Shown after Entrar but before the intro cinematic. The warning is a real
+  // modal, so the monster loop cannot start behind it and the camera keeps the
+  // user gesture for pointer lock when the player accepts.
+  function gateContentWarning() {
+    if (contentWarningAcknowledged) return true;
+    if (!contentWarning?.showModal) {
+      contentWarningAcknowledged = true;
+      return true;
+    }
+    if (contentWarningOpen) return false;
+    contentWarningOpen = true;
+    try {
+      contentWarning.showModal();
+    } catch {
+      contentWarningOpen = false;
+      contentWarningAcknowledged = true;
+      return true;
+    }
+    warningContinue?.focus();
+    return false;
+  }
 
   function showEnding(outcome) {
     match.phase = GAME_PHASES.ENDING;
@@ -255,6 +319,7 @@ async function start() {
     whisperTimer = 0;
     game.classList.remove('in-cutscene');
     const isWin = outcome === OUTCOMES.VICTORY || outcome === OUTCOMES.VICTORY_COMPLETE;
+    setMusic(outcome === OUTCOMES.VICTORY_COMPLETE ? 'truewin' : isWin ? 'win' : 'lose');
     game.classList.toggle('outcome-victory', isWin);
     game.classList.toggle('outcome-defeat', !isWin);
     if (walk.active) walk.pause();
@@ -288,7 +353,7 @@ async function start() {
     resetMatchState(match);
     inventory.reset();
     worldItems.reset();
-    decoys.reset();
+    roidSpray.reset();
     smashDebris.reset();
     specials.gateControl?.reset();
     hunt.reset();
@@ -307,10 +372,11 @@ async function start() {
     flashBurstLevel = 0;
     torchPower = 0.22;
     threatStage = 0; noticeUntil = 0;
+    setMusic('menu');
     write(ui['threat-notice'], '');
     game.style.setProperty('--capture-fade', '0');
     game.style.setProperty('--cine-fade', '0');
-    game.classList.remove('outcome-victory', 'outcome-defeat', 'point-of-no-return', 'adrenaline-active', 'in-cutscene');
+    game.classList.remove('outcome-victory', 'outcome-defeat', 'point-of-no-return', 'adrenaline-active', 'in-cutscene', 'roid-ready');
     if (menuSummary) menuSummary.hidden = true;
     syncHud();
   }
@@ -322,6 +388,7 @@ async function start() {
     expression = null;
     lastTime = 0;
     hasStarted = true;
+    setMusic('menu');
     game.classList.add('in-cutscene');
     cinematics.startIntro(() => {
       match.phase = GAME_PHASES.PLAYING;
@@ -341,6 +408,7 @@ async function start() {
     match.gateUnlocked = true;
     handView.reset();
     match.phase = GAME_PHASES.ESCAPING;
+    setMusic('chase');
     const outcome = resolveEscapeOutcome(inventory.tapesCount);
     match.outcome = outcome;
     game.classList.add('in-cutscene');
@@ -371,16 +439,15 @@ async function start() {
   function findGateLockTarget(pose) {
     const gateDoor = specials.gateControl?.door;
     if (!gateDoor || !gateDoor.locked || !pose) return null;
-    const d = Math.hypot(pose.x - gateDoor.pos.x, pose.z - gateDoor.pos.z);
-    if (d > 2.65 || pose.z > gateDoor.pos.z + .25 ||
-        Math.abs(pose.x - gateDoor.pos.x) > 1.85) return null;
-    const equipped = inventory.equipped;
-    if (equipped && KEY_ITEMS.includes(equipped) && !match.gateLocks[equipped] && inventory.has(equipped)) {
-      return { key: equipped, door: gateDoor };
+    if (pose.z > gateDoor.pos.z + .12) return null;
+    let best = null;
+    for (const [key, fixture] of Object.entries(gateFixtures)) {
+      const hit = lookingAt(pose, fixture, 2.7, .68);
+      if (!hit) continue;
+      const miss = hit.dist * Math.sqrt(Math.max(0, 1 - hit.dot * hit.dot));
+      if (miss < .52 && (!best || miss < best.miss)) best = { key, fixture, miss };
     }
-    const anyHeld = KEY_ITEMS.find(k => !match.gateLocks[k] && inventory.has(k));
-    if (anyHeld) return { key: anyHeld, door: gateDoor };
-    return { key: null, door: gateDoor };
+    return best;
   }
 
   function computePromptText(pose) {
@@ -389,8 +456,9 @@ async function start() {
     if (pickup) return `[E] Recoger ${pickup.item.def.label.toLowerCase()}\n${pickup.item.def.purpose}`;
     const gateTarget = findGateLockTarget(pose);
     if (gateTarget) {
-      if (gateTarget.key) return `[E] ${ITEM_CATALOG[gateTarget.key].action}`;
-      return 'Portón · Falta ' + KEY_ITEMS.filter(k => !match.gateLocks[k]).map(k => ITEM_CATALOG[k].short.toLowerCase()).join(', ');
+      const { key, fixture } = gateTarget;
+      if (match.gateLocks[key]) return ITEM_CATALOG[key].result;
+      return inventory.has(key) ? '[E] ' + ITEM_CATALOG[key].action : fixture.label + ' · Falta ' + ITEM_CATALOG[key].short.toLowerCase();
     }
     if (!match.breakerSurged && specials.breaker && lookingAt(pose, specials.breaker.pos, 2.3, 0.45)) {
       return '[E] Sobrecargar tablero';
@@ -417,6 +485,8 @@ async function start() {
       if (def.category === 'lore') {
         handView.inspect(kind);
         setWhisper(`Cintas · ${match.tapesCollected}/${LORE_ITEMS.length}`, 3.3);
+      } else if (kind === 'roid') {
+        setWhisper('ROID · apunta a La Veladora y rocía con F', 4.4);
       }
       syncHud();
       wake();
@@ -460,6 +530,20 @@ async function start() {
     return Boolean(doorDone);
   }
 
+  function findRoidTarget(pose) {
+    const s = hunt.state;
+    if (!pose || s.mode === 'capture' || s.mode === 'dead') return null;
+    camera.updateMatrixWorld();
+    camera.getWorldDirection(roidDir);
+    roidOffset.set(s.x - camera.position.x, s.y + 1.08 - camera.position.y, s.z - camera.position.z);
+    const dist = roidOffset.length();
+    if (dist > 11 || dist < .35) return null;
+    if (roidOffset.divideScalar(dist).dot(roidDir) < .74) return null;
+    const eye = { x: pose.x, y: pose.cameraY, z: pose.z };
+    if (!hunt.navigation.visible(eye, { x: s.x, y: s.y + 1.15, z: s.z })) return null;
+    return { dist };
+  }
+
   function handleUseItem() {
     if (!walk.active || captureShot || cinematics.active || match.phase !== GAME_PHASES.PLAYING) return false;
     const pose = walk.pose;
@@ -478,12 +562,18 @@ async function start() {
         wake();
         return true;
       }
-    } else if (equipped === 'decoy') {
-      if (inventory.consume('decoy')) {
-        decoys.spawn(pose, camera);
-        handView.triggerUse('decoy');
-        gameplayAudio.playDecoyThrow();
-        setWhisper(match.pointOfNoReturn ? 'Ignoró el señuelo' : 'Señuelo lanzado', 2.8);
+    } else if (equipped === 'roid') {
+      const roidHit = findRoidTarget(pose);
+      if (inventory.consume('roid')) {
+        handView.triggerUse('roid');
+        roidSpray.burst(camera, pose, Boolean(roidHit));
+        gameplayAudio.playRoidSpray(Boolean(roidHit));
+        if (roidHit) {
+          hunt.repel(ROID_FLEE_SECONDS);
+          setWhisper('ROID · La Veladora huye', 3.4);
+        } else {
+          setWhisper('ROID · apunta a La Veladora', 2.8);
+        }
         syncHud();
         wake();
         return true;
@@ -511,10 +601,10 @@ async function start() {
       }
     } else if (KEY_ITEMS.includes(equipped)) {
       const gateTarget = findGateLockTarget(pose);
-      if (gateTarget && !match.gateLocks[equipped] && inventory.has(equipped)) {
+      if (gateTarget?.key === equipped && !match.gateLocks[equipped] && inventory.has(equipped)) {
         return installGateLock(equipped);
       }
-      setWhisper('Úsalo en el portón de la plaza.', 3.2);
+      setWhisper(gateFixtures[equipped].label + ' · Portón exterior', 3.2);
       return false;
     }
     return false;
@@ -523,6 +613,7 @@ async function start() {
   walk = firstPerson(camera, playerObstacles, wake, {
     debris,
     isInspecting: () => Boolean(preset) || game.classList.contains('inspecting'),
+    onStartRequest: gateContentWarning,
     onBegin: () => {
       if (match.phase === GAME_PHASES.ENDING) {
         resetFullMatch();
@@ -536,6 +627,8 @@ async function start() {
       }
       if (match.phase === GAME_PHASES.PAUSED) {
         match.phase = pausedPhase;
+        gameMusic.resume();
+        game.dataset.music = gameMusic.getState().state;
         screenFx.reset();
         preset = null;
         lastTime = 0;
@@ -546,6 +639,8 @@ async function start() {
     onPause: () => {
       doorAudio.silenceMonster();
       gameplayAudio.silence();
+      gameMusic.pause();
+      game.dataset.music = gameMusic.getState().state;
       screenFx.reset();
       if (match.phase !== GAME_PHASES.ENDING) {
         pausedPhase = match.phase;
@@ -569,18 +664,28 @@ async function start() {
     onStickDirection: key => debug.recordStickDirection(key),
     onInteract: handleInteract,
     onUseItem: handleUseItem,
-    onSelectSlot: index => {
-      if (inventory.equip(index)) {
-        if (inventory.equipped) gameplayAudio.playEquip();
-        syncHud();
-        wake();
-      }
-    },
+    onSelectSlot: selectEquipment,
     onCycleSlot: cycleEquipment,
+    onToggleHolster: toggleHandsFree,
     onSkipCinematic: () => {
       if (cinematics.skip()) wake();
     }
   });
+  warningContinue?.addEventListener('click', e => {
+    e.stopPropagation();
+    contentWarningAcknowledged = true;
+    contentWarningOpen = false;
+    contentWarning?.close();
+    walk.requestStart();
+  });
+  warningBack?.addEventListener('click', e => {
+    e.stopPropagation();
+    contentWarningOpen = false;
+    contentWarning?.close();
+    enterBtn?.focus();
+  });
+  contentWarning?.addEventListener('close', () => { contentWarningOpen = false; });
+  contentWarning?.addEventListener('cancel', () => { contentWarningOpen = false; });
   if (enterBtn) enterBtn.disabled = true;
 
   cinematics = createCinematics({
@@ -601,12 +706,39 @@ async function start() {
     syncHud();
     wake();
   }
-  ui['equip-prev'].addEventListener('click', () => cycleEquipment(-1));
-  ui['equip-next'].addEventListener('click', () => cycleEquipment(1));
+  function selectEquipment(index) {
+    if (match.phase !== GAME_PHASES.PLAYING || captureShot) return;
+    // Pressing the slot that is already in hand stows it without throwing it
+    // away. A second press, or X, brings it back.
+    if (inventory.selectedIndex === index && inventory.equipped) {
+      inventory.unequip();
+      gameplayAudio.playHolster();
+      syncHud();
+      wake();
+      return;
+    }
+    if (!inventory.equip(index)) return;
+    gameplayAudio.playEquip();
+    syncHud();
+    wake();
+  }
+  function toggleHandsFree() {
+    if (match.phase !== GAME_PHASES.PLAYING || captureShot) return;
+    const wasEquipped = Boolean(inventory.equipped);
+    if (!inventory.toggleHolster()) return;
+    if (wasEquipped) gameplayAudio.playHolster(); else gameplayAudio.playEquip();
+    syncHud();
+    wake();
+  }
   useBtn?.addEventListener('click', e => {
     e.stopPropagation();
     unlockGameAudio();
     handleUseItem();
+  });
+  holsterBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    unlockGameAudio();
+    toggleHandsFree();
   });
   skipHint?.addEventListener('click', e => {
     e.stopPropagation();
@@ -620,6 +752,7 @@ async function start() {
     if (atmosphere.state.audioEnabled) atmosphere.audio.unlock();
     doorAudio.unlock();
     gameplayAudio.unlock();
+    gameMusic.unlock();
   }
   bindSoundControl(document, soundState, { onInteract: unlockGameAudio });
   enterBtn?.addEventListener('click', unlockGameAudio);
@@ -645,20 +778,8 @@ async function start() {
   }
   const debug = setupDebug(scene, actor, walk, frameView, wake, playerBody, atmosphere, debris);
 
-  function playEncounter(dt, pose, escalation, decoyInfo) {
-    const threat = escalation ? {
-      chaseSpeed: escalation.chaseSpeed,
-      patrolSpeed: escalation.patrolSpeed,
-      investigateSpeed: escalation.investigateSpeed,
-      sightRange: escalation.sightRange,
-      hearingMult: escalation.hearingMult,
-      lostTimeout: escalation.lostTimeout,
-      crossingSpeedMult: escalation.crossingSpeedMult,
-      throwCooldownMult: escalation.throwCooldownMult,
-      frenzy: escalation.frenzy,
-      decoy: decoyInfo
-    } : null;
-
+  function playEncounter(dt, pose, escalation) {
+    const threat = escalation ? { ...escalation } : null;
     const s = hunt.update(dt, pose, threat);
     furniture.update(dt, s.carry);
     const d = Math.hypot(pose.x - s.x, pose.z - s.z);
@@ -674,10 +795,6 @@ async function start() {
     if (s.smashedProp) {
       smashDebris.burst(s.smashedProp.x ?? s.x, 0.55, s.smashedProp.z ?? s.z, 0x8d6e4c, 10);
       gameplayAudio.playWallSmash(Math.max(0.2, 1 - d / 24) * 0.72, pan);
-    }
-    if (s.smashedDecoy) {
-      decoys.silenceAt(s.x, s.z, 2.2);
-      gameplayAudio.playWallSmash(Math.max(0.2, 1 - d / 22) * 0.6, pan);
     }
 
     const caught = s.mode === 'capture' || s.mode === 'dead';
@@ -731,6 +848,7 @@ async function start() {
     scheduled = false;
     if (contextLost) return;
     const dt = lastTime ? Math.min(.08, (now - lastTime) / 1000) : 0;
+    roidSpray.update(dt);
 
     if (whisperTimer > 0) {
       whisperTimer = Math.max(0, whisperTimer - dt);
@@ -745,7 +863,7 @@ async function start() {
 
     if (cinematics.active) {
       if (match.phase === GAME_PHASES.PAUSED) {
-        renderer.draw(scene, camera, null);
+        renderer.draw(scene, camera, null, playerBody.visibleHeadSurfaces);
         lastTime = 0;
         return;
       }
@@ -781,7 +899,7 @@ async function start() {
       }
       if (renderer.environment.flashBurst) renderer.environment.flashBurst.value = flashBurstLevel;
       if (renderer.environment.adrenalineFx) renderer.environment.adrenalineFx.value = 0;
-      renderer.draw(scene, camera, null);
+      renderer.draw(scene, camera, null, playerBody.visibleHeadSurfaces);
       syncLiveHud();
       if ((cinematics.active && !cinematics.holding) || atmosphere.animating(reducedMotionQuery.matches)) {
         lastTime = now;
@@ -807,7 +925,6 @@ async function start() {
     let pose = walk.pose;
 
     let esc = null;
-    let decoyInfo = null;
     if (walk.active && !previewing && match.phase === GAME_PHASES.PLAYING && !captureShot) {
       const timerRes = stepMatchTimer(match, dt);
       if (timerRes.hitPointOfNoReturn) {
@@ -817,6 +934,7 @@ async function start() {
       if (timerRes.hitTimeout) {
         match.phase = GAME_PHASES.LOCKDOWN;
         match.outcome = OUTCOMES.DEFEAT_TIMEOUT;
+        setMusic('lose');
         cinematics.startTimeoutDefeat(pose, () => showEnding(OUTCOMES.DEFEAT_TIMEOUT));
         syncHud();
         lastTime = now;
@@ -827,18 +945,6 @@ async function start() {
       walk.setAdrenaline(inventory.adrenalineActive);
       worldItems.update(dt, atmosphere.state.time, reducedMotionQuery.matches);
       smashDebris.update(dt);
-      const decoyResult = decoys.update(dt);
-      if (decoyResult.beepEvent) {
-        const bx = decoyResult.beepEvent.x;
-        const bz = decoyResult.beepEvent.z;
-        const bd = Math.hypot(bx - pose.x, bz - pose.z);
-        const bpan = ((bx - pose.x) * Math.cos(pose.yaw) - (bz - pose.z) * Math.sin(pose.yaw)) / Math.max(.01, bd);
-        gameplayAudio.playDecoyBeep(Math.max(0.08, 1 - bd / 28), bpan);
-      }
-      decoyInfo = decoyResult.loudest
-        ? { id: `${Math.round(decoyResult.loudest.x * 10)}:${Math.round(decoyResult.loudest.z * 10)}`,
-            x: decoyResult.loudest.x, z: decoyResult.loudest.z, radius: decoyResult.loudest.noiseRadius }
-        : null;
       esc = computeEscalation({
         elapsed: match.elapsed,
         keysCollected: inventory.keysFoundCount,
@@ -853,13 +959,26 @@ async function start() {
     }
 
     if (walk.active && !previewing) {
-      pose = playEncounter(dt, pose, esc, decoyInfo);
+      pose = playEncounter(dt, pose, esc);
     } else if (previewing) {
       if (preset) frameView(preset);
       if (actor.update(dt, Infinity)) debug.refresh();
     } else if (captureShot && hunt.state.mode === 'capture') {
       pose = captureShot(actor, hunt.state, capturePose(hunt.state.captureTime), obstacles, reducedMotionQuery.matches);
     }
+
+    const musicDistance = walk.active && !previewing
+      ? Math.hypot(pose.x - hunt.state.x, pose.z - hunt.state.z)
+      : Infinity;
+    gameMusic.sync({
+      phase: match.phase,
+      threatStage,
+      mode: hunt.state.mode,
+      distance: musicDistance,
+      outcome: match.outcome
+    });
+    game.dataset.music = gameMusic.getState().state;
+    game.dataset.musicRunning = String(gameMusic.getState().running);
 
     if (walk.active && !previewing) {
       const playerSeesMonster = hunt.navigation.visible(
@@ -907,6 +1026,9 @@ async function start() {
     if (interactBtn) interactBtn.hidden = !promptText;
 
     const hand = handView.update(dt, reducedMotionQuery.matches);
+    const roidAim = inventory.equipped === 'roid' && walk.active && !previewing &&
+      match.phase === GAME_PHASES.PLAYING && !captureShot ? findRoidTarget(pose) : null;
+    game.classList.toggle('roid-ready', Boolean(roidAim));
     const heldKind = walk.active && !captureShot && !previewing ? hand.kind : null;
     playerBody.update(dt, { ...pose, heldItem: heldKind }, {
       inspecting: inspecting || Boolean(preset),
@@ -939,7 +1061,7 @@ async function start() {
     }
 
     syncLiveHud(pose);
-    renderer.draw(scene, camera, screenFxFrame);
+    renderer.draw(scene, camera, screenFxFrame, playerBody.visibleHeadSurfaces);
 
     if (walk.active || walk.animating || (previewing && actor.animating) ||
         atmosphere.animating(reducedMotionQuery.matches) || flashBurstLevel > 0.005) {

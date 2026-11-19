@@ -6,6 +6,7 @@ RUN npm ci
 
 COPY index.html style.css ./
 COPY src ./src
+COPY music ./music
 COPY assets ./assets
 
 RUN npm run build

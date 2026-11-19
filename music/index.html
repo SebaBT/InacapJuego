@@ -1,0 +1,719 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pabellón B — Música</title>
+<meta name="description" content="Una sola pieza de terror suave, ocho estados. Capas que entran y salen, y un tempo que sube en persecución, al estilo Balatro.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230a0a0b'/%3E%3Ccircle cx='8' cy='8' r='3' fill='%23c9a45c'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a0b;
+    --bone: #e9e3d6;
+    --muted: #948e83;
+    --dim: #6d6860;
+    --line: rgba(233, 227, 214, .13);
+    --line-strong: rgba(233, 227, 214, .26);
+    --amber: #c9a45c;
+    --blood: #93433c;
+    --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+    --sans: "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { background: var(--bg); }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    color: var(--bone);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.5;
+    background:
+      radial-gradient(120% 80% at 18% -10%, #171518 0%, #0c0c0d 48%, #08080a 100%) fixed;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, .5) 100%);
+    z-index: 1;
+  }
+
+  .grain {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    opacity: .04;
+    z-index: 2;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");
+  }
+
+  ::selection { background: rgba(201, 164, 92, .28); color: var(--bone); }
+
+  .shell {
+    position: relative;
+    z-index: 3;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 30px clamp(20px, 4vw, 56px) 72px;
+  }
+
+  .micro {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    font-weight: 500;
+    letter-spacing: .2em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .topline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .topline span:nth-child(2) { color: var(--muted); }
+
+  .hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(280px, .7fr);
+    align-items: end;
+    gap: clamp(28px, 5vw, 72px);
+    padding: clamp(48px, 8vw, 104px) 0 clamp(36px, 5vw, 64px);
+  }
+
+  h1 {
+    margin: 0;
+    font-family: var(--serif);
+    font-size: clamp(46px, 7.6vw, 96px);
+    font-weight: 400;
+    line-height: .93;
+    letter-spacing: -.038em;
+    text-wrap: balance;
+  }
+
+  h1 em {
+    font-style: italic;
+    color: var(--amber);
+  }
+
+  .hero-side {
+    display: grid;
+    gap: 28px;
+    padding-bottom: 6px;
+  }
+
+  .lede {
+    margin: 0;
+    max-width: 46ch;
+    font-size: 14.5px;
+    line-height: 1.72;
+    color: #b6b0a4;
+  }
+
+  .lede strong { color: var(--bone); font-weight: 500; }
+
+  .hero-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 26px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .hero-stats b {
+    color: var(--bone);
+    font-weight: 500;
+    margin-right: 3px;
+  }
+
+  .transport {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) minmax(120px, 190px) auto auto;
+    align-items: center;
+    gap: clamp(14px, 2.2vw, 28px);
+    padding: 16px 0;
+    border-top: 1px solid var(--line-strong);
+    border-bottom: 1px solid var(--line-strong);
+    background: rgba(10, 10, 11, .84);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  .power,
+  .ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    min-height: 36px;
+    padding: 0 15px;
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    background: transparent;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--bone);
+    cursor: pointer;
+    transition: border-color .18s ease, color .18s ease, background .18s ease;
+    white-space: nowrap;
+  }
+
+  .power:hover,
+  .ghost:hover {
+    border-color: rgba(201, 164, 92, .7);
+    color: var(--amber);
+  }
+
+  .power.is-on {
+    border-color: rgba(201, 164, 92, .7);
+    color: var(--amber);
+    background: rgba(201, 164, 92, .05);
+  }
+
+  .power-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: .55;
+  }
+
+  .power.is-on .power-dot { animation: breathe 2.6s ease-in-out infinite; }
+
+  @keyframes breathe {
+    0%, 100% { opacity: .4; transform: scale(.85); }
+    50% { opacity: 1; transform: scale(1.12); }
+  }
+
+  .now {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .now-line {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    min-width: 0;
+  }
+
+  .now-name {
+    font-family: var(--serif);
+    font-size: 24px;
+    font-weight: 400;
+    letter-spacing: -.015em;
+    line-height: 1.1;
+    color: var(--bone);
+    white-space: nowrap;
+  }
+
+  .now-meta {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--dim);
+    white-space: nowrap;
+  }
+
+  .now-blurb {
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: #948e83;
+    max-width: 60ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .meter {
+    display: block;
+    width: 100%;
+    height: 44px;
+  }
+
+  .volume {
+    display: grid;
+    gap: 7px;
+  }
+
+  .volume input {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 2px;
+    margin: 0;
+    background: linear-gradient(
+      to right,
+      rgba(201, 164, 92, .72) 0%,
+      rgba(201, 164, 92, .72) var(--fill, 72%),
+      var(--line-strong) var(--fill, 72%)
+    );
+    outline: none;
+    cursor: pointer;
+  }
+
+  .volume input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--amber);
+    border: 0;
+  }
+
+  .volume input::-moz-range-thumb {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--amber);
+    border: 0;
+  }
+
+  .volume input:focus-visible { outline: 1px solid var(--amber); outline-offset: 5px; }
+
+  .ghost { color: var(--muted); min-height: 34px; padding: 0 12px; }
+  .ghost.is-on { color: var(--amber); border-color: rgba(201, 164, 92, .55); }
+
+  .transport-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .hint {
+    margin: 12px 0 0;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .hint[hidden] { display: none; }
+
+  .block { margin-top: clamp(52px, 7vw, 84px); }
+
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 20px;
+    padding-bottom: 10px;
+    margin-bottom: 22px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .section-head h2 { color: var(--muted); }
+
+  .section-note {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .states {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .state {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 14px;
+    padding: 18px 18px 16px;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    background: rgba(255, 255, 255, .012);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color .18s ease, background .18s ease;
+  }
+
+  .state:hover {
+    border-color: rgba(233, 227, 214, .3);
+    background: rgba(255, 255, 255, .025);
+  }
+
+  .state:focus-visible {
+    outline: 1px solid var(--amber);
+    outline-offset: 3px;
+  }
+
+  .state.is-active {
+    border-color: rgba(201, 164, 92, .55);
+    background: rgba(201, 164, 92, .055);
+    box-shadow: inset 2px 0 0 var(--amber);
+  }
+
+  .state-index {
+    padding-top: 3px;
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: .1em;
+    color: var(--dim);
+  }
+
+  .state.is-active .state-index { color: var(--amber); }
+
+  .state-body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .state-name {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+    font-family: var(--serif);
+    font-size: 21px;
+    font-weight: 400;
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    color: var(--bone);
+  }
+
+  .state-tag {
+    padding: 2px 5px;
+    border: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 8px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .state-blurb {
+    font-size: 12px;
+    line-height: 1.55;
+    color: #9b958a;
+    max-width: 48ch;
+  }
+
+  .state-layers {
+    display: flex;
+    gap: 3px;
+    width: 100%;
+    max-width: 168px;
+    margin-top: 8px;
+  }
+
+  .state-tick {
+    flex: 1;
+    height: 2px;
+    background: var(--amber);
+    opacity: calc(.1 + var(--v, 0) * .9);
+  }
+
+  .state-meta {
+    margin-top: 1px;
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .explain {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: clamp(24px, 4vw, 56px);
+    margin-bottom: 34px;
+  }
+
+  .explain p {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.78;
+    color: #a8a296;
+  }
+
+  .explain p:first-child { color: #c3bdb1; }
+
+  .explain em {
+    font-style: normal;
+    color: var(--bone);
+    border-bottom: 1px solid rgba(201, 164, 92, .45);
+  }
+
+  .matrix-wrap {
+    border-top: 1px solid var(--line);
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  .matrix { min-width: 720px; }
+
+  .matrix-row {
+    display: grid;
+    align-items: center;
+    min-height: 34px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .matrix-head {
+    min-height: 38px;
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .matrix-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: 11px;
+    color: #a49e93;
+  }
+
+  .matrix-cell.layer {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    color: var(--bone);
+    font-size: 12px;
+    line-height: 1.25;
+  }
+
+  .matrix-hint {
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--dim);
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--amber);
+    opacity: calc(.07 + var(--v, 0) * .93);
+    box-shadow: 0 0 0 1px rgba(233, 227, 214, .07);
+  }
+
+  .legend {
+    margin: 12px 0 0;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--dim);
+    max-width: 72ch;
+  }
+
+  footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 24px;
+    margin-top: clamp(56px, 8vw, 96px);
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 8.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: #5f5b54;
+  }
+
+  @media (max-width: 900px) {
+    .hero {
+      grid-template-columns: 1fr;
+      gap: 26px;
+      padding-top: 56px;
+    }
+
+    .transport {
+      position: static;
+      grid-template-columns: 1fr auto;
+      row-gap: 14px;
+    }
+
+    .power { grid-column: 1; grid-row: 1; justify-self: start; }
+    .transport-actions { grid-column: 2; grid-row: 1; justify-self: end; }
+    .now { grid-column: 1 / -1; grid-row: 2; min-width: 0; }
+    .now-blurb { white-space: normal; }
+
+    .meter {
+      grid-column: 1 / -1;
+      grid-row: 3;
+      height: 38px;
+    }
+
+    .volume { grid-column: 1 / -1; grid-row: 4; }
+
+    .states { grid-template-columns: 1fr; }
+    .explain { grid-template-columns: 1fr; gap: 18px; }
+  }
+
+  @media (max-width: 560px) {
+    .shell { padding-top: 22px; }
+    .topline span:nth-child(2) { display: none; }
+    h1 { font-size: clamp(40px, 12vw, 58px); }
+    .now-name { font-size: 20px; }
+    .now-line { flex-wrap: wrap; gap: 2px 12px; }
+    .state { padding: 16px 14px 14px; gap: 10px; }
+    .state-name { font-size: 19px; }
+    .section-note { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="grain" aria-hidden="true"></div>
+
+<main class="shell">
+  <header class="topline">
+    <span>Pabellón B</span>
+    <span>marcador procedural</span>
+    <span>WebAudio · 72–160 BPM</span>
+  </header>
+
+  <section class="hero">
+    <h1>Una sola pieza.<br><em>Ocho estados.</em></h1>
+    <div class="hero-side">
+      <p class="lede">
+        La misma pieza de ocho compases suena de principio a fin. Al cambiar de estado
+        no se corta ni se reinicia: <strong>sólo entran y salen capas</strong>. Así la música
+        acompaña sin dar saltos y sin cansar.
+      </p>
+      <div class="hero-stats" aria-label="Datos de la pieza">
+        <span><b>72–160</b> BPM</span>
+        <span><b>8</b> compases</span>
+        <span><b>20</b> capas</span>
+        <span><b>0</b> samples</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="transport" aria-label="Reproductor">
+    <button id="power" class="power" type="button" aria-pressed="false">
+      <span class="power-dot" aria-hidden="true"></span>
+      <span id="power-label">Comenzar</span>
+    </button>
+
+    <div class="now">
+      <span class="micro">Ahora suena</span>
+      <div class="now-line">
+        <strong id="now-name" class="now-name">Menú</strong>
+        <span id="now-meta" class="now-meta"></span>
+      </div>
+      <span id="now-blurb" class="now-blurb"></span>
+    </div>
+
+    <canvas id="meter" class="meter" aria-hidden="true"></canvas>
+
+    <label class="volume">
+      <span class="micro">Volumen</span>
+      <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72" aria-label="Volumen">
+    </label>
+
+    <div class="transport-actions">
+      <button id="alert" class="ghost" type="button" title="Probar el aviso de peligro">Alerta</button>
+      <button id="tour" class="ghost" type="button" aria-pressed="false">Recorrido</button>
+    </div>
+  </section>
+
+  <p id="hint" class="hint">Pulsa un estado o «Comenzar». El navegador necesita un gesto para reproducir audio.</p>
+
+  <section class="block" aria-labelledby="states-title">
+    <div class="section-head">
+      <h2 id="states-title" class="micro">Estados</h2>
+      <span class="section-note">la misma pieza, distinta instrumentación</span>
+    </div>
+    <div id="states" class="states"></div>
+  </section>
+
+  <section class="block" aria-labelledby="how-title">
+    <div class="section-head">
+      <h2 id="how-title" class="micro">Cómo funciona</h2>
+      <span class="section-note">lógica Balatro</span>
+    </div>
+
+    <div class="explain">
+      <p>
+        Todo comparte tonalidad y material. Menú, ambiente y desenlaces van a 72 BPM;
+        persecución sube a 160 y cercanía a 148, con un redoble que tapa el cambio.
+        No empieza otra canción: <em>se suman clave, redoblante, coro, theremin, tambores
+        y metales</em> sobre la melodía que ya estaba sonando.
+      </p>
+      <p>
+        Pausa no es una pista aparte: es el estado anterior detrás de una puerta, con el filtro
+        a 680 Hz y menos volumen. Victoria cambia la melodía a modo mayor; derrota la desafina
+        y la hunde. Veinte capas sintetizadas en vivo, sin samples ni archivos de audio.
+      </p>
+    </div>
+
+    <div class="matrix-wrap">
+      <div id="matrix" class="matrix" role="table" aria-label="Peso de cada capa en cada estado"></div>
+    </div>
+    <p class="legend">
+      El punto indica cuánto pesa cada capa en cada estado. Pausa se aplica como tratamiento
+      sobre el estado que esté sonando, por eso no tiene columna propia. En pantallas angostas,
+      la tabla se desplaza en horizontal.
+    </p>
+  </section>
+
+  <footer>
+    <span>Pabellón B — marcador de terror suave</span>
+    <span>72–160 BPM · La menor ↔ La mayor · WebAudio</span>
+  </footer>
+</main>
+
+<script src="./demo.bundle.js" defer></script>
+</body>
+</html>
