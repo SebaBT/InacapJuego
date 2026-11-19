@@ -1,6 +1,6 @@
 import {
   ClampToEdgeWrapping, Float32BufferAttribute, FrontSide, Group, Mesh, MeshBasicMaterial,
-  NoColorSpace, PlaneGeometry, Uint16BufferAttribute, Vector3
+  NoColorSpace, PlaneGeometry, Quaternion, Euler, Uint16BufferAttribute, Vector3
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { canvasTexture, patina } from './textures.js';
@@ -11,6 +11,7 @@ import {
   computePlayerBodyPlacement,
   PLAYER_BODY_CONFIG,
   PLAYER_BODY_STYLES,
+  solveSwitchArmIK,
   stripSwitchNeckAndCapCollar
 } from './player-body-pose.js';
 import {
@@ -152,7 +153,9 @@ export function makePlayerBody(makeMaterial, wake) {
   bodyMaterial.side = FrontSide;
   const headOpaqueMaterial = makeMaterial(weave, { emission: 0.30 });
   headOpaqueMaterial.side = FrontSide;
-  const headMaterials = [headOpaqueMaterial];
+  const mosaicMaterial = makeMaterial(weave, { emission: .35, faceMosaic: true });
+  mosaicMaterial.name = 'Mosaico facial';
+  const headMaterials = [headOpaqueMaterial, mosaicMaterial];
 
   const streetpassShadow = makeShadowMesh('Sombra jugador StreetPass', 0.46, 0.46);
   const switchShadows = [
@@ -164,6 +167,11 @@ export function makePlayerBody(makeMaterial, wake) {
   const rigs = {};
   const bonesByStyle = {};
   const headsByStyle = {};
+  const restingHandSkins = {};
+  const gripTarget = new Vector3(), gripScale = new Vector3();
+  const shoulderRest = new Vector3(), aimWorld = new Vector3(), palmWorld = new Vector3();
+  const gripRotation = new Quaternion(), wristRotation = new Quaternion(), tiltRotation = new Quaternion(), gripEuler = new Euler();
+  let heldRoot = null;
   let headTemplate = null;
   let currentStyle = 'streetpass';
   let wireframe = false;
@@ -182,6 +190,13 @@ export function makePlayerBody(makeMaterial, wake) {
       const clone = headTemplate.clone(true);
       clone.name = 'Cabeza Mii';
       clone.visible = false;
+      if (style === 'streetpass') {
+        clone.traverse(mesh => {
+          if (!mesh.isMesh) return;
+          if (mesh.name === 'OpaFaceline') mesh.material = mosaicMaterial;
+          else if (mesh.name !== 'OpaHair') mesh.visible = false;
+        });
+      }
       clone.scale.setScalar(PLAYER_BODY_CONFIG[style].headScale);
       headBone.add(clone);
       headsByStyle[style] = clone;
@@ -228,6 +243,65 @@ export function makePlayerBody(makeMaterial, wake) {
     attachHeads();
   }
 
+  function poseGrip(bones, hand, pose, camera, blend) {
+    const skin = restingHandSkins[currentStyle];
+    if (skin) skin.geometry.setIndex(hand?.kind && !pose.capture ? skin.carrying : skin.resting);
+    if (!hand?.kind || pose.capture) {
+      if (heldRoot) heldRoot.visible = false;
+      return;
+    }
+    const street = currentStyle === 'streetpass';
+    const wrist = street ? bones.handRPs : bones.wrist_r;
+    if (!wrist) return;
+    heldRoot = hand.root;
+    heldRoot.visible = true;
+    if (heldRoot.parent !== wrist) wrist.add(heldRoot);
+    heldRoot.position.set(street ? 1 : -3.6, street ? 1.8 : 2, street ? -.5 : 1);
+    const fp = camera ? 1 - blend : 0;
+    hand.sleeve.visible = street && fp > .5;
+    if (fp > .001) {
+      // Move the actual right hand to the carrying pose. The Switch skeleton
+      // reaches with both arm bones; StreetPass has a free, skinned hand.
+      gripTarget.set(Math.min(.245, camera.aspect * .165), -.215 + hand.lift,
+        -.50 - hand.reach).applyQuaternion(camera.quaternion).add(camera.position);
+      if (street) {
+        wrist.parent.worldToLocal(gripTarget);
+        wrist.position.lerp(gripTarget, fp);
+      } else {
+        aimWorld.copy(gripTarget);
+        bones.chest.worldToLocal(gripTarget);
+        solveSwitchArmIK(bones, -1, gripTarget, fp, -.15);
+        // The first-person camera sits above and ahead of this short rig.
+        // Align the whole posed arm to its grip, keeping the forearm length.
+        const shoulder = bones.arm_r1;
+        wrist.localToWorld(palmWorld.copy(heldRoot.position));
+        shoulder.parent.worldToLocal(aimWorld);
+        shoulder.parent.worldToLocal(palmWorld);
+        shoulder.position.addScaledVector(aimWorld.sub(palmWorld), fp);
+      }
+    } else if (pose.evidence) {
+      const lift = pose.evidence;
+      if (street) {
+        wrist.position.lerp(gripTarget.set(-24, 76, 29), lift);
+      } else {
+        solveSwitchArmIK(bones, -1, gripTarget.set(-23, 32, 26), lift, -.12);
+      }
+    }
+    wrist.updateWorldMatrix(true, false);
+    wrist.getWorldScale(gripScale);
+    heldRoot.scale.set(1 / gripScale.x, 1 / gripScale.y, 1 / gripScale.z);
+    gripRotation.setFromEuler(gripEuler.set(.04 + hand.tilt, pose.bodyYaw ?? pose.yaw, .24, 'YXZ'));
+    if (pose.evidence && camera) gripRotation.slerp(camera.quaternion, pose.evidence);
+    if (camera && fp > .001) {
+      wristRotation.copy(camera.quaternion).multiply(
+        tiltRotation.setFromEuler(gripEuler.set(-.12 + hand.tilt, -.32, .30)));
+      gripRotation.slerp(wristRotation, fp);
+    }
+    wrist.getWorldQuaternion(wristRotation);
+    heldRoot.quaternion.copy(wristRotation.invert()).multiply(gripRotation);
+    hand.reachShoulder(street && fp <= .5 ? bones.bodyPs.localToWorld(gripTarget.set(-11, 65, 0)) : null);
+  }
+
   async function loadStyle(style) {
     const bytes = MII_BODY_BINARIES[style];
     if (!bytes) return;
@@ -245,10 +319,25 @@ export function makePlayerBody(makeMaterial, wake) {
         ? stripSwitchNeckAndCapCollar(obj, { Float32BufferAttribute, Uint16BufferAttribute })
         : -1;
       paintGeometry(obj, style, collarCenterIdx);
+      if (obj.isSkinnedMesh && obj.name === (style === 'streetpass' ? 'hands_m' : 'body_m')) {
+        const geometry = obj.geometry, resting = geometry.index;
+        const right = obj.skeleton.bones.findIndex(b => b.name === (style === 'streetpass' ? 'handRPg' : 'wrist_r'));
+        if (resting && right >= 0) {
+          const keep = [], joints = geometry.attributes.skinIndex;
+          for (let i = 0; i < resting.count; i += 3) {
+            const tri = [resting.getX(i), resting.getX(i + 1), resting.getX(i + 2)];
+            if (tri.every(v => joints.getX(v) !== right)) keep.push(...tri);
+          }
+          geometry.setIndex(keep);
+          restingHandSkins[style] = { geometry, resting, carrying: geometry.index };
+          geometry.setIndex(resting);
+        }
+      }
       obj.material = bodyMaterial;
       obj.frustumCulled = false;
     });
 
+    if (style === 'switch') shoulderRest.copy(boneMap.arm_r1.position);
     rigs[style] = model;
     bonesByStyle[style] = boneMap;
     rigHolder.add(model);
@@ -266,7 +355,7 @@ export function makePlayerBody(makeMaterial, wake) {
     for (const s of switchShadows) s.visible = showSwitchShadows;
   }
 
-  Promise.all([loadStyle('streetpass'), loadStyle('switch'), loadHead()]).catch(err => {
+  const ready = Promise.all([loadStyle('streetpass'), loadStyle('switch'), loadHead()]).catch(err => {
     console.error('No se pudo cargar el cuerpo Mii del jugador:', err);
   });
 
@@ -281,7 +370,7 @@ export function makePlayerBody(makeMaterial, wake) {
   function setWireframe(enabled) {
     wireframe = Boolean(enabled);
     bodyMaterial.wireframe = wireframe;
-    for (const mat of headMaterials) mat.wireframe = wireframe;
+    for (const mat of headMaterials) mat.wireframe = mat !== mosaicMaterial && wireframe;
   }
 
   function update(dt, pose, opts = {}) {
@@ -301,10 +390,12 @@ export function makePlayerBody(makeMaterial, wake) {
       if (Number.isFinite(facingYaw)) lastYaw = facingYaw;
     }
 
+    if (currentStyle === 'switch' && bonesByStyle.switch) bonesByStyle.switch.arm_r1.position.copy(shoulderRest);
     const placement = computePlayerBodyPlacement(pose, currentStyle, opts);
     const activeRig = rigs[currentStyle];
     if (!placement.visible || !activeRig || pose.capture?.hideBody) {
       root.visible = false;
+      if (heldRoot) heldRoot.visible = false;
       resetArmAvoidanceState(armAvoidance);
       return;
     }
@@ -327,14 +418,16 @@ export function makePlayerBody(makeMaterial, wake) {
     if (showHead) {
       const fading = headOpacity < 0.99;
       if (headOpaqueMaterial.transparent !== fading) {
-        headOpaqueMaterial.transparent = fading;
-        headOpaqueMaterial.needsUpdate = true;
+        headOpaqueMaterial.transparent = mosaicMaterial.transparent = fading;
+        headOpaqueMaterial.needsUpdate = mosaicMaterial.needsUpdate = true;
       }
       for (const mat of headMaterials) {
         if (mat.uniforms?.opacity) mat.uniforms.opacity.value = headOpacity;
       }
     }
     const bones = bonesByStyle[currentStyle];
+    const heldItem = opts.heldItem ?? pose.heldItem ?? null;
+    const tpBlend = Math.max(0, Math.min(1, pose.thirdPersonBlend ?? (pose.thirdPerson ? 1 : 0)));
     const avoidanceOpts = !pose.capture && (opts.obstacles || opts.bounds)
       ? {
           dt,
@@ -344,7 +437,7 @@ export function makePlayerBody(makeMaterial, wake) {
         }
       : null;
     if (currentStyle === 'streetpass') {
-      const spPose = { ...pose, doorInteraction };
+      const spPose = { ...pose, doorInteraction, heldItem };
       applyStreetPassPose(bones, spPose);
       if (avoidanceOpts) {
         applyStreetPassArmAvoidance(bones, spPose, armAvoidance, avoidanceOpts);
@@ -355,7 +448,7 @@ export function makePlayerBody(makeMaterial, wake) {
       streetpassShadow.scale.setScalar(scaleDrop);
       streetpassShadow.material.opacity = Math.max(0.25, 1 - jumpHeight * 0.85);
     } else if (currentStyle === 'switch') {
-      const swPose = { ...pose, turnRate, doorInteraction };
+      const swPose = { ...pose, turnRate, doorInteraction, heldItem };
       applySwitchPose(bones, swPose);
       if (avoidanceOpts) {
         applySwitchArmAvoidance(bones, swPose, armAvoidance, avoidanceOpts);
@@ -375,6 +468,7 @@ export function makePlayerBody(makeMaterial, wake) {
         shadow.material.opacity = Math.max(0.2, 1 - (clearance + jumpHeight) * 0.9);
       }
     }
+    poseGrip(bones, opts.hand, pose, opts.camera, tpBlend);
     if (pose.capture) {
       const c = pose.capture;
       const brace = c.grip * (1 - c.drop);
@@ -404,6 +498,7 @@ export function makePlayerBody(makeMaterial, wake) {
 
   return {
     root,
+    ready,
     get style() { return currentStyle; },
     setStyle,
     setWireframe,

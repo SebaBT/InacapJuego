@@ -1,5 +1,6 @@
 import { PerspectiveCamera, Vector3 } from 'three';
 import { makeRenderer } from './render.js';
+import { makeTexturesAsync } from './textures.js';
 import { buildCorridor } from './corridor.js';
 import { firstPerson } from './walk.js';
 import { computePlayerFear } from './player-motion.js';
@@ -13,37 +14,150 @@ import { createScreenFx } from './screen-fx.js';
 import { createDoorController } from './doors.js';
 import { setupDebug } from './debug.js';
 import { bindSoundControl, makeControlledDoorAudio, soundState } from './sound.js';
-import { extraLights, hall, lights, monsterSpawn, playerSpawn, plazaLights, rooms, worldBounds } from './layout.js';
+import {
+  extraLights, hall, lights, monsterSpawn, playerSpawn, plazaLights, rooms, worldBounds
+} from './layout.js';
+import {
+  allGateLocksUnlocked,
+  computeEscalation,
+  countGateLocksUnlocked,
+  createMatchState,
+  formatCountdown,
+  formatElapsedClock,
+  GAME_PHASES,
+  KEY_ITEMS,
+  LORE_ITEMS,
+  OUTCOMES,
+  resetMatchState,
+  resolveEscapeOutcome,
+  stepMatchTimer, THREAT_STAGES
+} from './game-state.js';
+import {
+  createBreakableDebris,
+  createDecoyProjectiles,
+  createHandViewModel,
+  createInventory,
+  createWorldItems,
+  ITEM_CATALOG, ENERGY_SECONDS, FLASH_SECONDS
+} from './items.js';
+import { createItemModels } from './item-models.js';
+import { createObjectiveGuide } from './objectives.js';
+import { makeGameplayAudio } from './gameplay-audio.js';
+import { createCinematics, setGateOpenVisual } from './cinematics.js';
 
+const SUMMARY_ICONS = {
+  keys: '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="7" cy="10" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10.2 10h6.6v2.4M14 10v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  tapes: '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="2.8" y="5" width="14.4" height="10" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="10" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="13" cy="10" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+  time: '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><circle cx="10" cy="10.5" r="7" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.8v3.9l2.6 1.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
+};
+
+const yieldFrame = () => new Promise(resolve => {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+  else setTimeout(resolve, 0);
+});
+
+const game = document.querySelector('#game');
 const canvas = document.querySelector('#view');
 const status = document.querySelector('#message');
 const interactPrompt = document.querySelector('#interact-prompt');
 const interactBtn = document.querySelector('#interact-btn');
+const useBtn = document.querySelector('#use-btn');
+const skipHint = document.querySelector('#skip-hint');
+const cineWhisper = document.querySelector('#cine-whisper');
 const menuCaption = document.querySelector('#menu-context');
+const menuTitle = document.querySelector('#menu-title');
+const menuSummary = document.querySelector('#menu-summary');
+const sumKeys = document.querySelector('#sum-keys');
+const sumTapes = document.querySelector('#sum-tapes');
+const sumTime = document.querySelector('#sum-time');
+const enterBtn = document.querySelector('#enter');
+const enterLabel = document.querySelector('#enter-label');
+const loaderEl = document.querySelector('#loader');
+const loaderFill = document.querySelector('#loader-fill');
+const loaderPct = document.querySelector('#loader-pct');
+const menuBrief = document.querySelector('#menu-brief');
+const ui = Object.fromEntries(['mission', 'mission-title', 'mission-route', 'bearing-arrow', 'threat-level', 'threat-notice',
+  'held-readout', 'held-name', 'held-action', 'equip-prev', 'equip-next', 'cine-chapter', 'skip-label']
+  .map(id => [id, document.getElementById(id)]));
+function write(el, value) { if (el && el.textContent !== value) el.textContent = value; }
+const hudTimer = document.querySelector('#hud-timer');
+const hudClock = document.querySelector('#hud-clock');
 
-function start() {
+function setLoadProgress(fraction) {
+  const pct = Math.max(0, Math.min(1, fraction));
+  if (loaderFill) loaderFill.style.transform = `scaleX(${pct.toFixed(4)})`;
+  if (loaderPct) loaderPct.textContent = `${Math.round(pct * 100)} %`;
+}
+
+function lookingAt(pose, target, maxDist, minDot = 0.45) {
+  if (!pose || !target) return null;
+  const dx = target.x - pose.x;
+  const dy = (target.y ?? 1.2) - (pose.cameraY ?? 1.61);
+  const dz = target.z - pose.z;
+  const dist = Math.hypot(dx, dy, dz);
+  if (dist > maxDist || dist < 0.05) return null;
+  const cosP = Math.cos(pose.pitch || 0);
+  const dirX = -Math.sin(pose.yaw || 0) * cosP;
+  const dirY = Math.sin(pose.pitch || 0);
+  const dirZ = -Math.cos(pose.yaw || 0) * cosP;
+  const dot = (dx * dirX + dy * dirY + dz * dirZ) / dist;
+  if (dot < minDot) return null;
+  return { dist, dot };
+}
+
+async function start() {
+  setLoadProgress(0.04);
   const renderer = makeRenderer(canvas);
   const { minX, maxX, minZ, maxZ } = worldBounds;
   const sightRange = Math.max(135, Math.hypot(maxX - minX, maxZ - minZ, hall.height) * 1.6);
   const camera = new PerspectiveCamera(64, 1, .045, sightRange);
-  const { scene, obstacles, doors, switches, debris, furniture: movableFurniture } = buildCorridor(renderer.material);
+
+  const art = await makeTexturesAsync(p => setLoadProgress(0.04 + p * 0.44), yieldFrame);
+  setLoadProgress(0.50);
+
+  const { scene, obstacles, doors, switches, debris, furniture: movableFurniture, destruction, specials } =
+    buildCorridor(renderer.material, art);
+  await yieldFrame();
+  setLoadProgress(0.64);
+
   const actor = makeMascot(renderer.material);
   scene.add(actor.root);
-  const playerObstacles = [...obstacles];
-  for (const { min, max } of actor.collisions) playerObstacles.push({
+  const actorObstacles = actor.collisions.map(({ min, max }) => ({
     get x0() { return min.x; }, get x1() { return max.x; },
     get z0() { return min.z; }, get z1() { return max.z; }
-  });
-  let scheduled = false, lastTime = 0, contextLost = false;
+  }));
+  const playerObstacles = [];
+  function syncTerrain() {
+    playerObstacles.length = 0;
+    playerObstacles.push(...obstacles, ...actorObstacles);
+  }
+  syncTerrain();
+  const models = createItemModels(renderer.material, art.white);
+  const worldItems = createWorldItems({ scene, makeMaterial: renderer.material, whiteTex: art.white, models,
+    visible: (p, item) => hunt.navigation.canReach({ x: p.x, y: p.cameraY, z: p.z },
+      { x: item.x, y: item.y + .14, z: item.z }) });
+  const handView = createHandViewModel({ models, makeMaterial: renderer.material, whiteTex: art.white });
+  const decoys = createDecoyProjectiles({ scene, obstacles, models });
+  const smashDebris = createBreakableDebris({ scene, makeMaterial: renderer.material, whiteTex: art.white });
+  const inventory = createInventory();
+  const match = createMatchState();
+  setLoadProgress(0.74);
+
+  let scheduled = false, lastTime = 0, contextLost = false, readyToDraw = false;
   function wake() {
-    if (scheduled || contextLost) return;
+    if (!readyToDraw || scheduled || contextLost) return;
     scheduled = true;
     requestAnimationFrame(frame);
   }
+
   const playerBody = makePlayerBody(renderer.material, wake);
   scene.add(playerBody.root);
+  await playerBody.ready;
+  setLoadProgress(0.88);
+
   const atmosphere = createAtmosphere(lights, extraLights);
   const doorAudio = makeControlledDoorAudio(soundState);
+  const gameplayAudio = makeGameplayAudio(soundState);
   const doorCtrl = createDoorController({ doors, switches, atmosphere, audio: doorAudio });
   let hunt;
   const furniture = createFurniture({
@@ -51,60 +165,468 @@ function start() {
     obstacles,
     onChange: () => hunt?.invalidateNavigation()
   });
-  hunt = createMonsterHunt({ obstacles, doors, holdDoor: doorCtrl.holdForMonster, closeDoor: doorCtrl.closeForMonster, furniture });
+  hunt = createMonsterHunt({
+    obstacles,
+    doors,
+    holdDoor: doorCtrl.holdForMonster,
+    closeDoor: doorCtrl.closeForMonster,
+    destruction, furniture
+  });
   const doorStates = [...rooms.map(r => r.id), 'anexo', 'anexo', ...plazaLights.map(() => 'plaza')]
     .map(id => doorCtrl.doors.find(d => d.id === id) || null);
-  const game = document.querySelector('#game');
+  const guide = createObjectiveGuide(hunt.navigation);
   const screenFx = createScreenFx(game);
-  let preset = 'arrival', hasStarted = false;
+
+  let preset = 'arrival', hasStarted = false, pausedPhase = GAME_PHASES.PLAYING;
   let captureShot = null, expression = null;
-  const menuTitle = document.querySelector('#menu-title'), enterLabel = document.querySelector('#enter-label');
+  let transientWhisper = '', whisperTimer = 0;
+  let flashBurstLevel = 0, torchPower = 0.22;
+  let threatStage = 0, noticeUntil = 0;
   const targetLocal = new Vector3();
-  const walk = firstPerson(camera, playerObstacles, wake, {
+  const torchDir = new Vector3();
+
+  function setWhisper(text, secs = 2.6) {
+    transientWhisper = text;
+    whisperTimer = secs;
+  }
+
+  function updateSummaryChips() {
+    if (!menuSummary) return;
+    const keysDone = inventory.keysFoundCount;
+    if (sumKeys) sumKeys.innerHTML = `${SUMMARY_ICONS.keys}<span>${keysDone}/3</span>`;
+    if (sumTapes) sumTapes.innerHTML = `${SUMMARY_ICONS.tapes}<span>${inventory.tapesCount}/${LORE_ITEMS.length}</span>`;
+    if (sumTime) sumTime.innerHTML = `${SUMMARY_ICONS.time}<span>${formatElapsedClock(match.elapsed)}</span>`;
+  }
+
+  function syncLiveHud(pose = walk.pose) {
+    write(hudClock, formatCountdown(match.elapsed));
+    const stage = THREAT_STAGES[threatStage];
+    write(ui['threat-level'], stage.name);
+    game.dataset.threat = String(threatStage);
+    hudTimer.dataset.phase = threatStage === 3 ? 'frenzy' : threatStage ? 'warning' : 'normal';
+    if (match.phase === GAME_PHASES.PLAYING && !captureShot) {
+      const goal = guide.update(pose, inventory, match.gateLocks);
+      write(ui['mission-title'], goal.item);
+      write(ui['mission-route'], goal.landmark + ' · ' + goal.meters + ' m');
+      const routeLabel = goal.title + ' · ' + goal.destination + '. ' + goal.next;
+      if (ui.mission.title !== routeLabel) {
+        ui.mission.title = routeLabel;
+        ui.mission.setAttribute('aria-label', routeLabel);
+      }
+      ui['bearing-arrow'].style.transform = 'rotate(' + goal.angle.toFixed(2) + 'rad)';
+    }
+    if (match.elapsed >= noticeUntil) write(ui['threat-notice'], '');
+    const showingFilm = cinematics.active && !cinematics.holding && match.phase !== GAME_PHASES.PAUSED;
+    game.classList.toggle('in-cutscene', showingFilm);
+    if (skipHint) skipHint.hidden = !showingFilm || !cinematics.canSkip;
+    const skipText = cinematics.awaitingStart ? 'Comenzar' : 'Omitir';
+    write(ui['skip-label'], skipText);
+    skipHint.setAttribute('aria-label', skipText);
+    write(ui['cine-chapter'], showingFilm ? cinematics.chapter : '');
+    write(cineWhisper, showingFilm ? cinematics.whisper : match.phase === GAME_PHASES.PLAYING ? transientWhisper : '');
+    game.classList.toggle('adrenaline-active', inventory.adrenalineActive);
+    game.classList.toggle('point-of-no-return', match.pointOfNoReturn);
+  }
+
+  function syncHud() {
+    const equipped = inventory.equipped, def = ITEM_CATALOG[equipped];
+    const canCycle = inventory.slots.filter(slot => slot.count > 0).length > 1;
+    handView.setItem(equipped);
+    ui['held-readout'].hidden = !def;
+    ui['equip-prev'].hidden = ui['equip-next'].hidden = !canCycle;
+    useBtn.hidden = def?.category !== 'tool';
+    if (def) {
+      const count = inventory.slots[inventory.selectedIndex].count;
+      write(ui['held-name'], def.label + (count > 1 ? ' ×' + count : ''));
+      ui['held-name'].title = def.purpose;
+      write(ui['held-action'], def.action);
+      useBtn.setAttribute('aria-label', def.action + '. ' + def.purpose);
+    }
+    syncLiveHud();
+  }
+
+  let walk;
+  let cinematics;
+
+  function showEnding(outcome) {
+    match.phase = GAME_PHASES.ENDING;
+    match.outcome = outcome;
+    transientWhisper = '';
+    whisperTimer = 0;
+    game.classList.remove('in-cutscene');
+    const isWin = outcome === OUTCOMES.VICTORY || outcome === OUTCOMES.VICTORY_COMPLETE;
+    game.classList.toggle('outcome-victory', isWin);
+    game.classList.toggle('outcome-defeat', !isWin);
+    if (walk.active) walk.pause();
+    if (outcome === OUTCOMES.VICTORY_COMPLETE) {
+      if (menuCaption) menuCaption.textContent = 'Final completo · Amanecer';
+      if (menuTitle) menuTitle.textContent = 'Verdad revelada';
+    } else if (outcome === OUTCOMES.VICTORY) {
+      if (menuCaption) menuCaption.textContent = 'Salida desbloqueada';
+      if (menuTitle) menuTitle.textContent = 'Sobreviviste';
+    } else if (outcome === OUTCOMES.DEFEAT_TIMEOUT) {
+      if (menuCaption) menuCaption.textContent = '03:00 · Tiempo agotado';
+      if (menuTitle) menuTitle.textContent = 'Encerrado';
+    } else {
+      if (menuCaption) menuCaption.textContent = 'La Veladora te atrapó';
+      if (menuTitle) menuTitle.textContent = 'Has caído';
+    }
+    write(menuBrief, isWin ? (outcome === OUTCOMES.VICTORY_COMPLETE
+      ? 'Las tres cintas llegaron al otro lado del portón.' : 'Lograste salir antes del cierre. Las tres cintas revelan el final completo.')
+      : outcome === OUTCOMES.DEFEAT_TIMEOUT ? 'El cierre de seguridad bloqueó el pabellón.'
+      : 'La Veladora te alcanzó. Un flash puede darte tiempo para escapar.');
+    updateSummaryChips();
+    if (menuSummary) menuSummary.hidden = false;
+    if (enterLabel) enterLabel.textContent = 'Reintentar';
+    if (interactPrompt) interactPrompt.textContent = '';
+    if (interactBtn) interactBtn.hidden = true;
+    syncHud();
+    wake();
+  }
+
+  function resetFullMatch() {
+    resetMatchState(match);
+    inventory.reset();
+    worldItems.reset();
+    decoys.reset();
+    smashDebris.reset();
+    specials.gateControl?.reset();
+    hunt.reset();
+    syncTerrain();
+    guide.reset();
+    handView.reset();
+    hunt.invalidateNavigation();
+    doorCtrl.reset();
+    atmosphere.reset();
+    actor.face.reset();
+    cinematics.stop();
+    captureShot = null;
+    expression = null;
+    transientWhisper = '';
+    whisperTimer = 0;
+    flashBurstLevel = 0;
+    torchPower = 0.22;
+    threatStage = 0; noticeUntil = 0;
+    write(ui['threat-notice'], '');
+    game.style.setProperty('--capture-fade', '0');
+    game.style.setProperty('--cine-fade', '0');
+    game.classList.remove('outcome-victory', 'outcome-defeat', 'point-of-no-return', 'adrenaline-active', 'in-cutscene');
+    if (menuSummary) menuSummary.hidden = true;
+    syncHud();
+  }
+
+  function beginIntroSequence() {
+    match.phase = GAME_PHASES.INTRO;
+    screenFx.reset();
+    preset = null;
+    expression = null;
+    lastTime = 0;
+    hasStarted = true;
+    game.classList.add('in-cutscene');
+    cinematics.startIntro(() => {
+      match.phase = GAME_PHASES.PLAYING;
+      game.classList.remove('in-cutscene');
+      write(menuBrief, 'Reúne la llave, el fusible y el cortapernos. El portón está en la plaza.');
+      if (menuCaption) menuCaption.textContent = 'Recorrido en pausa';
+      if (menuTitle) menuTitle.textContent = 'Pabellón B';
+      if (enterLabel) enterLabel.textContent = 'Continuar';
+      syncHud();
+      wake();
+    });
+    syncHud();
+  }
+
+  function triggerEscapeSequence() {
+    if (match.phase === GAME_PHASES.ESCAPING || match.phase === GAME_PHASES.ENDING) return;
+    match.gateUnlocked = true;
+    handView.reset();
+    match.phase = GAME_PHASES.ESCAPING;
+    const outcome = resolveEscapeOutcome(inventory.tapesCount);
+    match.outcome = outcome;
+    game.classList.add('in-cutscene');
+    cinematics.startEscape({ isComplete: outcome === OUTCOMES.VICTORY_COMPLETE }, () => {
+      showEnding(outcome);
+    });
+    syncHud();
+    wake();
+  }
+
+  function installGateLock(kind) {
+    if (!kind || match.gateLocks[kind] || !inventory.has(kind)) return false;
+    inventory.consume(kind);
+    handView.triggerUse(kind);
+    match.gateLocks[kind] = true;
+    specials.gateControl?.setLockVisual?.(kind, true);
+    gameplayAudio.playLockInstall(kind);
+    const unlockedCount = countGateLocksUnlocked(match.gateLocks);
+    if (allGateLocksUnlocked(match.gateLocks)) {
+      triggerEscapeSequence();
+    } else {
+      setWhisper(ITEM_CATALOG[kind].result + ` · ${unlockedCount}/3`, 3.2);
+    }
+    syncHud();
+    return true;
+  }
+
+  function findGateLockTarget(pose) {
+    const gateDoor = specials.gateControl?.door;
+    if (!gateDoor || !gateDoor.locked || !pose) return null;
+    const d = Math.hypot(pose.x - gateDoor.pos.x, pose.z - gateDoor.pos.z);
+    if (d > 2.65 || pose.z > gateDoor.pos.z + .25 ||
+        Math.abs(pose.x - gateDoor.pos.x) > 1.85) return null;
+    const equipped = inventory.equipped;
+    if (equipped && KEY_ITEMS.includes(equipped) && !match.gateLocks[equipped] && inventory.has(equipped)) {
+      return { key: equipped, door: gateDoor };
+    }
+    const anyHeld = KEY_ITEMS.find(k => !match.gateLocks[k] && inventory.has(k));
+    if (anyHeld) return { key: anyHeld, door: gateDoor };
+    return { key: null, door: gateDoor };
+  }
+
+  function computePromptText(pose) {
+    if (!walk.active || captureShot || cinematics.active || match.phase !== GAME_PHASES.PLAYING) return '';
+    const pickup = worldItems.findTarget(pose);
+    if (pickup) return `[E] Recoger ${pickup.item.def.label.toLowerCase()}\n${pickup.item.def.purpose}`;
+    const gateTarget = findGateLockTarget(pose);
+    if (gateTarget) {
+      if (gateTarget.key) return `[E] ${ITEM_CATALOG[gateTarget.key].action}`;
+      return 'Portón · Falta ' + KEY_ITEMS.filter(k => !match.gateLocks[k]).map(k => ITEM_CATALOG[k].short.toLowerCase()).join(', ');
+    }
+    if (!match.breakerSurged && specials.breaker && lookingAt(pose, specials.breaker.pos, 2.3, 0.45)) {
+      return '[E] Sobrecargar tablero';
+    }
+    if (specials.monitor && lookingAt(pose, specials.monitor.pos, 2.4, 0.45)) {
+      return match.cameraPingCooldown > 0
+        ? `Radar ${Math.ceil(match.cameraPingCooldown)}s`
+        : '[E] Localizar a La Veladora';
+    }
+    return doorCtrl.prompt;
+  }
+
+  function handleInteract() {
+    if (!walk.active || captureShot || cinematics.active || match.phase !== GAME_PHASES.PLAYING) return false;
+    const pose = walk.pose;
+    const pickup = worldItems.findTarget(pose);
+    if (pickup) {
+      const { kind, def } = pickup.item;
+      if (!inventory.add(kind)) return false;
+      worldItems.collect(pickup.item);
+      match.keysCollected = inventory.keysFoundCount;
+      match.tapesCollected = inventory.tapesCount;
+      gameplayAudio.playPickup(def.category);
+      if (def.category === 'lore') {
+        handView.inspect(kind);
+        setWhisper(`Cintas · ${match.tapesCollected}/${LORE_ITEMS.length}`, 3.3);
+      }
+      syncHud();
+      wake();
+      return true;
+    }
+
+    const gateTarget = findGateLockTarget(pose);
+    if (gateTarget?.key) {
+      const ok = installGateLock(gateTarget.key);
+      wake();
+      return ok;
+    }
+
+    if (!match.breakerSurged && specials.breaker && lookingAt(pose, specials.breaker.pos, 2.3, 0.45)) {
+      match.breakerSurged = true;
+      atmosphere.surge();
+      gameplayAudio.playFlash();
+      flashBurstLevel = Math.max(flashBurstLevel, 0.35);
+      const md = Math.hypot(hunt.state.x - specials.breaker.pos.x, hunt.state.z - specials.breaker.pos.z);
+      if (md < 20) hunt.stun(2.5);
+      setWhisper('SOBRECARGA EN EL PABELLÓN', 2.4);
+      wake();
+      return true;
+    }
+
+    if (specials.monitor && lookingAt(pose, specials.monitor.pos, 2.4, 0.45)) {
+      if (match.cameraPingCooldown <= 0) {
+        match.cameraPingCooldown = 14;
+        const dist = Math.round(Math.hypot(hunt.state.x - pose.x, hunt.state.z - pose.z));
+        const sector = hunt.state.x < -3.6 ? 'PLAZA' : hunt.state.z < -8 ? 'NORTE' : 'SUR';
+        gameplayAudio.playEquip();
+        setWhisper(`RADAR · ${sector} · ${dist}M`, 3.0);
+        wake();
+        return true;
+      }
+      return false;
+    }
+
+    const doorDone = doorCtrl.interact(pose);
+    wake();
+    return Boolean(doorDone);
+  }
+
+  function handleUseItem() {
+    if (!walk.active || captureShot || cinematics.active || match.phase !== GAME_PHASES.PLAYING) return false;
+    const pose = walk.pose;
+    const equipped = inventory.equipped;
+    if (!equipped || handView.using) return false;
+
+    if (equipped === 'energy') {
+      if (inventory.consume('energy')) {
+        inventory.adrenalineTimer = ENERGY_SECONDS;
+        walk.refillStamina();
+        walk.setAdrenaline(true);
+        handView.triggerUse('energy');
+        gameplayAudio.playEnergy();
+        setWhisper('Aguante recuperado · 8 s', 2.6);
+        syncHud();
+        wake();
+        return true;
+      }
+    } else if (equipped === 'decoy') {
+      if (inventory.consume('decoy')) {
+        decoys.spawn(pose, camera);
+        handView.triggerUse('decoy');
+        gameplayAudio.playDecoyThrow();
+        setWhisper(match.pointOfNoReturn ? 'Ignoró el señuelo' : 'Señuelo lanzado', 2.8);
+        syncHud();
+        wake();
+        return true;
+      }
+    } else if (equipped === 'flash') {
+      if (inventory.consume('flash')) {
+        handView.triggerUse('flash');
+        gameplayAudio.playFlash();
+        flashBurstLevel = 1.0;
+        const dx = hunt.state.x - pose.x;
+        const dz = hunt.state.z - pose.z;
+        const d = Math.hypot(dx, dz) || 0.01;
+        const facingDot = (-Math.sin(pose.yaw) * dx - Math.cos(pose.yaw) * dz) / d;
+        const los = hunt.navigation.visible(
+          { x: pose.x, y: pose.cameraY, z: pose.z },
+          { x: hunt.state.x, y: hunt.state.y + 1.5, z: hunt.state.z }
+        );
+        if (d < 16.5 && los && facingDot > .2) {
+          hunt.stun(FLASH_SECONDS);
+          setWhisper('Aturdida · 4 s', 2.8);
+        } else setWhisper('Fuera de alcance', 2.4);
+        syncHud();
+        wake();
+        return true;
+      }
+    } else if (KEY_ITEMS.includes(equipped)) {
+      const gateTarget = findGateLockTarget(pose);
+      if (gateTarget && !match.gateLocks[equipped] && inventory.has(equipped)) {
+        return installGateLock(equipped);
+      }
+      setWhisper('Úsalo en el portón de la plaza.', 3.2);
+      return false;
+    }
+    return false;
+  }
+
+  walk = firstPerson(camera, playerObstacles, wake, {
     debris,
     isInspecting: () => Boolean(preset) || game.classList.contains('inspecting'),
     onBegin: () => {
-      screenFx.reset();
-      preset = null;
-      expression = null;
-      lastTime = 0;
-      if (hasStarted && hunt.state.mode !== 'dead') return;
-      if (hunt.state.mode === 'dead') {
-        hunt.reset(); doorCtrl.reset(); actor.face.reset();
-        captureShot = null;
-        game.style.setProperty('--capture-fade', '0');
-        menuTitle.textContent = 'Pabellón B';
+      if (match.phase === GAME_PHASES.ENDING) {
+        resetFullMatch();
+        beginIntroSequence();
+        return;
       }
-      hasStarted = true;
-      walk.restartAt(playerSpawn.x, playerSpawn.z);
-      if (menuCaption) menuCaption.textContent = 'Recorrido en pausa';
+      if (match.phase === GAME_PHASES.MENU || !hasStarted || hunt.state.mode === 'dead') {
+        resetFullMatch();
+        beginIntroSequence();
+        return;
+      }
+      if (match.phase === GAME_PHASES.PAUSED) {
+        match.phase = pausedPhase;
+        screenFx.reset();
+        preset = null;
+        lastTime = 0;
+        syncHud();
+        wake();
+      }
     },
     onPause: () => {
       doorAudio.silenceMonster();
+      gameplayAudio.silence();
       screenFx.reset();
-      // Pausing mid-grab must not leave the final curtain behind the menu.
-      // Death keeps its completed fade until the retry resets it.
+      if (match.phase !== GAME_PHASES.ENDING) {
+        pausedPhase = match.phase;
+        match.phase = GAME_PHASES.PAUSED;
+        write(menuCaption, pausedPhase === GAME_PHASES.INTRO ? 'Introducción en pausa' : 'Recorrido en pausa');
+        write(menuTitle, 'Pabellón B');
+        write(enterLabel, 'Continuar');
+        if (cinematics.active) {
+          write(menuBrief, cinematics.whisper);
+          menuSummary.hidden = true;
+        } else {
+          const goal = guide.update(walk.pose, inventory, match.gateLocks);
+          write(menuBrief, goal.title + ' · ' + goal.destination + '.');
+          updateSummaryChips();
+          menuSummary.hidden = false;
+        }
+      }
       if (hunt.state.mode === 'capture') game.style.setProperty('--capture-fade', '0');
+      syncHud();
     },
     onStickDirection: key => debug.recordStickDirection(key),
-    onInteract: () => {
-      doorCtrl.interact(walk.pose);
-      wake();
+    onInteract: handleInteract,
+    onUseItem: handleUseItem,
+    onSelectSlot: index => {
+      if (inventory.equip(index)) {
+        if (inventory.equipped) gameplayAudio.playEquip();
+        syncHud();
+        wake();
+      }
+    },
+    onCycleSlot: cycleEquipment,
+    onSkipCinematic: () => {
+      if (cinematics.skip()) wake();
     }
   });
+  if (enterBtn) enterBtn.disabled = true;
+
+  cinematics = createCinematics({
+    camera,
+    actor,
+    gateControl: specials.gateControl,
+    atmosphere,
+    gameplayAudio,
+    doorAudio,
+    walk,
+    navigation: hunt.navigation
+  });
+
+  function cycleEquipment(direction) {
+    if (match.phase !== GAME_PHASES.PLAYING || captureShot) return;
+    inventory.cycle(direction);
+    if (inventory.equipped) gameplayAudio.playEquip();
+    syncHud();
+    wake();
+  }
+  ui['equip-prev'].addEventListener('click', () => cycleEquipment(-1));
+  ui['equip-next'].addEventListener('click', () => cycleEquipment(1));
+  useBtn?.addEventListener('click', e => {
+    e.stopPropagation();
+    unlockGameAudio();
+    handleUseItem();
+  });
+  skipHint?.addEventListener('click', e => {
+    e.stopPropagation();
+    unlockGameAudio();
+    if (cinematics.skip()) wake();
+  });
+
   const reducedMotionQuery = matchMedia('(prefers-reduced-motion: reduce)');
   function unlockGameAudio() {
     if (soundState.effectiveVolume <= 0) return;
     if (atmosphere.state.audioEnabled) atmosphere.audio.unlock();
     doorAudio.unlock();
+    gameplayAudio.unlock();
   }
   bindSoundControl(document, soundState, { onInteract: unlockGameAudio });
-  document.querySelector('#enter')?.addEventListener('click', unlockGameAudio);
+  enterBtn?.addEventListener('click', unlockGameAudio);
   canvas.addEventListener('pointerdown', unlockGameAudio);
+
   function frameView(view) {
     preset = view;
-    // Inspection uses the original display spot and its own camera. The
-    // player's position (including stairs) and the live hunt remain intact.
     actor.place(monsterSpawn.x, 0, monsterSpawn.z, monsterSpawn.yaw);
     if (view === 'face') {
       const distance = .27 + Math.max(.96, .51 / (Math.tan(camera.fov * Math.PI / 360) * camera.aspect));
@@ -123,55 +645,84 @@ function start() {
   }
   const debug = setupDebug(scene, actor, walk, frameView, wake, playerBody, atmosphere, debris);
 
-  function playEncounter(dt, pose) {
-    const s = hunt.update(dt, pose);
+  function playEncounter(dt, pose, escalation, decoyInfo) {
+    const threat = escalation ? {
+      chaseSpeed: escalation.chaseSpeed,
+      patrolSpeed: escalation.patrolSpeed,
+      investigateSpeed: escalation.investigateSpeed,
+      sightRange: escalation.sightRange,
+      hearingMult: escalation.hearingMult,
+      lostTimeout: escalation.lostTimeout,
+      crossingSpeedMult: escalation.crossingSpeedMult,
+      throwCooldownMult: escalation.throwCooldownMult,
+      frenzy: escalation.frenzy,
+      decoy: decoyInfo
+    } : null;
+
+    const s = hunt.update(dt, pose, threat);
     furniture.update(dt, s.carry);
+    const d = Math.hypot(pose.x - s.x, pose.z - s.z);
+    const pan = ((s.x - pose.x) * Math.cos(pose.yaw) - (s.z - pose.z) * Math.sin(pose.yaw)) / Math.max(.01, d);
+
+    if (s.smashedWall) {
+      syncTerrain();
+      const { x, y, z, dx, dz } = s.smashedWall;
+      smashDebris.burst(x, y + .72, z, 0xa5ac9e, 18, dx, dz);
+      gameplayAudio.playWallSmash(Math.max(0.25, 1 - d / 26), pan);
+      if (!reducedMotionQuery.matches) walk.triggerSlamImpact(pan < 0 ? -1 : 1, .85 * Math.max(0, 1 - d / 20));
+    }
+    if (s.smashedProp) {
+      smashDebris.burst(s.smashedProp.x ?? s.x, 0.55, s.smashedProp.z ?? s.z, 0x8d6e4c, 10);
+      gameplayAudio.playWallSmash(Math.max(0.2, 1 - d / 24) * 0.72, pan);
+    }
+    if (s.smashedDecoy) {
+      decoys.silenceAt(s.x, s.z, 2.2);
+      gameplayAudio.playWallSmash(Math.max(0.2, 1 - d / 22) * 0.6, pan);
+    }
+
     const caught = s.mode === 'capture' || s.mode === 'dead';
     if (caught && !captureShot) {
       captureShot = createCaptureShot(camera, pose);
       walk.setCaptured(true);
       doorAudio.silenceMonster();
-      // The grab has its own monstrous vocal impact immediately, before the
-      // full abyssal roar lands at ~0.78 s into the capture.
+      gameplayAudio.silence();
       doorAudio.monsterScream('alert', 0.95, 0);
+      setWhisper('La Veladora te atrapó.', 2.65);
     }
     actor.place(s.x, s.y, s.z, s.yaw);
     actor.setAnimation(s.animation);
-    const nextExpression = caught ? 'scream' : s.mode === 'chase' ? 'chase' : 'normal';
+    const nextExpression = caught ? 'scream'
+      : (s.stunned > 0 ? 'scream' : (s.mode === 'chase' || escalation?.frenzy) ? 'chase' : 'normal');
     if (expression !== nextExpression) {
       actor.face.setExpression(nextExpression);
       expression = nextExpression;
     }
-    const d = Math.hypot(pose.x - s.x, pose.z - s.z);
     const target = s.visible || caught ? actor.root.worldToLocal(targetLocal.set(pose.x, pose.cameraY, pose.z)) : null;
     const capture = caught ? capturePose(s.captureTime) : null;
-    actor.update(dt, target ? d : Infinity, target, { fold: s.fold, doorPress: s.doorPress, stridePhase: s.stridePhase,
-      stoop: Math.max(0, s.y - .72), captureSide: s.captureSide, capture, throw: s.throwPose });
-    const pan = ((s.x - pose.x) * Math.cos(pose.yaw) - (s.z - pose.z) * Math.sin(pose.yaw)) / Math.max(.01, d);
+    actor.update(dt, target ? d : Infinity, target, {
+      fold: s.fold, doorPress: s.doorPress, stridePhase: s.stridePhase,
+      stoop: s.stunned > 0 ? 0.35 : Math.max(0, s.y - .72),
+      captureSide: s.captureSide, capture, throw: s.throwPose
+    });
+
     if (s.stomp) {
-      // Signed float: ±1 while running, ±0.65 while stalking.
       const stepScale = Math.abs(s.stomp);
       const strength = ((Math.max(0, 1 - d / 22)) ** 1.25) * stepScale;
       walk.monsterStep(strength, Math.sign(s.stomp));
       doorAudio.monsterStomp(strength, pan);
     }
-    if (s.impact) {
-      // The thrown desk lands: a low thump and a short camera jolt, scaled by
-      // distance, without the footstep cue used while running.
+    if (s.impact && !s.smashedWall) {
       const strength = Math.max(0, 1 - d / 18) ** 1.2;
       if (!reducedMotionQuery.matches) walk.triggerSlamImpact(pan < 0 ? -1 : 1, .35 + .35 * strength);
       doorAudio.monsterStomp(.45 + .35 * strength, pan);
     }
-    if (s.scream) doorAudio.monsterScream(s.scream, Math.max(.12, 1 - d / 25), pan);
+    if (s.scream) doorAudio.monsterScream(s.scream === 'stun' ? 'alert' : s.scream, Math.max(.18, 1 - d / 25), pan);
     if (s.growl) doorAudio.monsterGrowl?.(s.growl, Math.max(.08, (1 - d / 24) ** 1.2), pan);
     if (!capture) return pose;
-    game.style.setProperty('--capture-fade', capture.fade.toFixed(3));
+    game.style.setProperty('--capture-fade', (capture.fade * 0.68).toFixed(3));
     const victim = captureShot(actor, s, capture, obstacles, reducedMotionQuery.matches);
     if (s.mode === 'dead') {
-      walk.pause();
-      menuCaption.textContent = 'La Veladora te atrapó';
-      menuTitle.textContent = 'Has muerto';
-      enterLabel.textContent = 'Volver a intentarlo';
+      showEnding(OUTCOMES.DEFEAT_CAPTURE);
     }
     return victim;
   }
@@ -180,33 +731,142 @@ function start() {
     scheduled = false;
     if (contextLost) return;
     const dt = lastTime ? Math.min(.08, (now - lastTime) / 1000) : 0;
+
+    if (whisperTimer > 0) {
+      whisperTimer = Math.max(0, whisperTimer - dt);
+      if (whisperTimer === 0) transientWhisper = '';
+    }
+    if (flashBurstLevel > 0) {
+      flashBurstLevel = Math.max(0, flashBurstLevel - dt * 3.8);
+    }
+
+    const inspecting = game.classList.contains('inspecting');
+    const previewing = Boolean(preset) || inspecting || walk.noclip;
+
+    if (cinematics.active) {
+      if (match.phase === GAME_PHASES.PAUSED) {
+        renderer.draw(scene, camera, null);
+        lastTime = 0;
+        return;
+      }
+      const cinePose = cinematics.update(dt, reducedMotionQuery.matches);
+      game.style.setProperty('--cine-fade', cinematics.fade.toFixed(3));
+      const pForBody = cinePose || walk.pose;
+      worldItems.update(dt, atmosphere.state.time, reducedMotionQuery.matches);
+      const evidence = pForBody.evidence > 0 ? 'tape3' : null;
+      handView.setItem(evidence);
+      const hand = handView.update(dt, reducedMotionQuery.matches);
+      playerBody.update(dt, { ...pForBody, heldItem: evidence }, {
+        hand: evidence ? hand : null, camera,
+        inspecting: false,
+        hasStarted: true,
+        doorInteraction: null,
+        obstacles: playerObstacles,
+        bounds: worldBounds,
+        reducedMotion: reducedMotionQuery.matches
+      });
+      atmosphere.update(dt, {
+        reducedMotion: reducedMotionQuery.matches,
+        active: true,
+        cameraX: camera.position.x,
+        cameraZ: camera.position.z
+      });
+      atmosphere.apply(renderer.environment);
+      if (renderer.environment.playerTorchPower) {
+        renderer.environment.playerTorchPos.value.copy(camera.position);
+        camera.getWorldDirection(torchDir);
+        renderer.environment.playerTorchDir.value.copy(torchDir);
+        renderer.environment.playerTorchPower.value =
+          cinematics.kind === 'escape' ? 0.12 : cinematics.kind === 'timeoutDefeat' ? 0.48 : 0.32;
+      }
+      if (renderer.environment.flashBurst) renderer.environment.flashBurst.value = flashBurstLevel;
+      if (renderer.environment.adrenalineFx) renderer.environment.adrenalineFx.value = 0;
+      renderer.draw(scene, camera, null);
+      syncLiveHud();
+      if ((cinematics.active && !cinematics.holding) || atmosphere.animating(reducedMotionQuery.matches)) {
+        lastTime = now;
+        wake();
+      } else {
+        lastTime = 0;
+      }
+      return;
+    }
+
+    game.style.setProperty('--cine-fade', '0');
+
     if (walk.active) walk.update(dt);
     else if (walk.animating) walk.stepTransition(dt);
+
     const approachPose = walk.pose;
-    const controlling = walk.active && !captureShot;
+    const controlling = walk.active && !captureShot && match.phase === GAME_PHASES.PLAYING;
     doorCtrl.update(walk.active ? dt : 0, controlling ? approachPose : null, controlling);
     const slam = doorCtrl.consumeSlam();
     if (slam && walk.active) walk.triggerSlamImpact(slam.side, slam.strength);
     const doorInteraction = controlling ? doorCtrl.getInteractionState(approachPose) : null;
     walk.applyDoorFollow(dt, doorInteraction);
     let pose = walk.pose;
-    const inspecting = game.classList.contains('inspecting');
-    const previewing = Boolean(preset) || inspecting || pose.noclip;
-    if (walk.active && !previewing) pose = playEncounter(dt, pose);
-    else if (previewing) {
+
+    let esc = null;
+    let decoyInfo = null;
+    if (walk.active && !previewing && match.phase === GAME_PHASES.PLAYING && !captureShot) {
+      const timerRes = stepMatchTimer(match, dt);
+      if (timerRes.hitPointOfNoReturn) {
+        atmosphere.triggerPointOfNoReturn();
+        if (!reducedMotionQuery.matches) walk.triggerSlamImpact(0, 1.0);
+      }
+      if (timerRes.hitTimeout) {
+        match.phase = GAME_PHASES.LOCKDOWN;
+        match.outcome = OUTCOMES.DEFEAT_TIMEOUT;
+        cinematics.startTimeoutDefeat(pose, () => showEnding(OUTCOMES.DEFEAT_TIMEOUT));
+        syncHud();
+        lastTime = now;
+        wake();
+        return;
+      }
+      inventory.update(dt);
+      walk.setAdrenaline(inventory.adrenalineActive);
+      worldItems.update(dt, atmosphere.state.time, reducedMotionQuery.matches);
+      smashDebris.update(dt);
+      const decoyResult = decoys.update(dt);
+      if (decoyResult.beepEvent) {
+        const bx = decoyResult.beepEvent.x;
+        const bz = decoyResult.beepEvent.z;
+        const bd = Math.hypot(bx - pose.x, bz - pose.z);
+        const bpan = ((bx - pose.x) * Math.cos(pose.yaw) - (bz - pose.z) * Math.sin(pose.yaw)) / Math.max(.01, bd);
+        gameplayAudio.playDecoyBeep(Math.max(0.08, 1 - bd / 28), bpan);
+      }
+      decoyInfo = decoyResult.loudest
+        ? { id: `${Math.round(decoyResult.loudest.x * 10)}:${Math.round(decoyResult.loudest.z * 10)}`,
+            x: decoyResult.loudest.x, z: decoyResult.loudest.z, radius: decoyResult.loudest.noiseRadius }
+        : null;
+      esc = computeEscalation({
+        elapsed: match.elapsed,
+        keysCollected: inventory.keysFoundCount,
+        pointOfNoReturn: match.pointOfNoReturn
+      });
+      if (esc.stage > threatStage) {
+        threatStage = esc.stage;
+        noticeUntil = match.elapsed + 3.5;
+        write(ui['threat-notice'], THREAT_STAGES[threatStage].effect);
+        gameplayAudio.playThreatRise(threatStage);
+      }
+    }
+
+    if (walk.active && !previewing) {
+      pose = playEncounter(dt, pose, esc, decoyInfo);
+    } else if (previewing) {
       if (preset) frameView(preset);
       if (actor.update(dt, Infinity)) debug.refresh();
     } else if (captureShot && hunt.state.mode === 'capture') {
       pose = captureShot(actor, hunt.state, capturePose(hunt.state.captureTime), obstacles, reducedMotionQuery.matches);
     }
-    // Seeing the monster nearby — or merely feeling her close — makes the
-    // player tremble, pant, and panic.
+
     if (walk.active && !previewing) {
       const playerSeesMonster = hunt.navigation.visible(
         { x: pose.x, y: pose.cameraY, z: pose.z },
         { x: hunt.state.x, y: hunt.state.y + 1.55, z: hunt.state.z }
       );
-      walk.setFear(computePlayerFear({
+      const computedFear = computePlayerFear({
         playerX: pose.x,
         playerZ: pose.z,
         playerYaw: pose.yaw,
@@ -215,26 +875,43 @@ function start() {
         monsterVisible: hunt.state.visible,
         monsterMode: hunt.state.mode,
         playerSeesMonster
-      }));
+      });
+      walk.setFear(computedFear);
+      gameplayAudio.updateAmbience(dt, {
+        active: !captureShot && match.phase === GAME_PHASES.PLAYING,
+        fear: computedFear,
+        escalation: esc?.level ?? 0,
+        frenzy: Boolean(esc?.frenzy)
+      });
+    } else {
+      gameplayAudio.updateAmbience(dt, { active: false });
     }
+
     const screenFxFrame = screenFx.update({
       running: walk.active && !previewing,
       reducedMotion: reducedMotionQuery.matches,
       pose,
       monster: hunt.state
     }, dt);
+
     const openings = renderer.environment.doorOpenings?.value;
     if (openings) {
       for (let i = 0; i < doorStates.length && i < openings.length; i++) {
         if (doorStates[i]) openings[i].z = doorStates[i].open;
       }
     }
-    const promptText = walk.active && !captureShot ? doorCtrl.prompt : '';
-    if (interactPrompt) interactPrompt.textContent = promptText;
+
+    const promptText = computePromptText(pose);
+    const touch = game.classList.contains('touch');
+    write(interactPrompt, touch ? promptText.replace('[E] ', '') : promptText.replace('[E] ', 'E · '));
     if (interactBtn) interactBtn.hidden = !promptText;
-    playerBody.update(dt, pose, {
+
+    const hand = handView.update(dt, reducedMotionQuery.matches);
+    const heldKind = walk.active && !captureShot && !previewing ? hand.kind : null;
+    playerBody.update(dt, { ...pose, heldItem: heldKind }, {
       inspecting: inspecting || Boolean(preset),
       hasStarted,
+      heldItem: heldKind, hand: heldKind ? hand : null, camera,
       doorInteraction: captureShot ? null : doorInteraction,
       obstacles: playerObstacles,
       bounds: worldBounds,
@@ -247,14 +924,32 @@ function start() {
       cameraZ: camera.position.z
     });
     atmosphere.apply(renderer.environment);
+
+    const targetTorch = match.pointOfNoReturn ? 1.0 : (walk.active && !previewing ? 0.24 : 0);
+    torchPower += (targetTorch - torchPower) * Math.min(1, dt * 5.0 + 0.12);
+    if (renderer.environment.playerTorchPower) {
+      renderer.environment.playerTorchPos.value.copy(camera.position);
+      camera.getWorldDirection(torchDir);
+      renderer.environment.playerTorchDir.value.copy(torchDir);
+      renderer.environment.playerTorchPower.value = torchPower;
+    }
+    if (renderer.environment.flashBurst) renderer.environment.flashBurst.value = flashBurstLevel;
+    if (renderer.environment.adrenalineFx) {
+      renderer.environment.adrenalineFx.value = inventory.adrenalineActive ? 0.85 : 0;
+    }
+
+    syncLiveHud(pose);
     renderer.draw(scene, camera, screenFxFrame);
-    if (walk.active || walk.animating || (previewing && actor.animating) || atmosphere.animating(reducedMotionQuery.matches)) {
+
+    if (walk.active || walk.animating || (previewing && actor.animating) ||
+        atmosphere.animating(reducedMotionQuery.matches) || flashBurstLevel > 0.005) {
       lastTime = now;
       wake();
     } else {
       lastTime = 0;
     }
   }
+
   function resize() { renderer.resize(camera); if (preset) frameView(preset); wake(); }
   window.addEventListener('resize', resize);
   reducedMotionQuery.addEventListener('change', wake);
@@ -262,21 +957,35 @@ function start() {
     e.preventDefault();
     contextLost = true;
     walk.pause();
-    document.querySelector('#enter').disabled = true;
-    status.textContent = 'Recuperando la imagen del pasillo…';
+    if (enterBtn) enterBtn.disabled = true;
+    if (status) status.textContent = 'Recuperando la imagen del pasillo…';
   });
   canvas.addEventListener('webglcontextrestored', () => {
     contextLost = false;
-    status.textContent = '';
-    document.querySelector('#enter').disabled = false;
+    if (status) status.textContent = '';
+    if (enterBtn) enterBtn.disabled = false;
     resize();
   });
+
+  readyToDraw = true;
+  setGateOpenVisual(specials.gateControl?.door, 0);
+  syncHud();
   resize();
+  atmosphere.apply(renderer.environment);
+  frameView(preset);
+  renderer.compile(scene, camera);
+  setLoadProgress(1);
+  await yieldFrame();
+  loaderEl?.classList.add('done');
+  if (enterBtn) enterBtn.disabled = false;
+  wake();
 }
 
-try { start(); }
-catch (error) {
+start().catch(error => {
   console.error(error);
-  document.querySelector('#enter').disabled = true;
-  status.textContent = 'No se pudo dibujar el pasillo. Abre el juego en un navegador con WebGL 2 y aceleración gráfica.';
-}
+  loaderEl?.classList.add('done');
+  if (enterBtn) enterBtn.disabled = true;
+  if (status) {
+    status.textContent = 'No se pudo dibujar el pasillo. Abre el juego en un navegador con WebGL 2 y aceleración gráfica.';
+  }
+});

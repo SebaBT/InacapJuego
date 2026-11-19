@@ -152,6 +152,7 @@ test('inside classroom 101 the monster hurls a blocking desk out of a bay to cap
     obstacles: map.obstacles,
     doors: map.doors,
     furniture,
+    patrolPoints: [],
     spawn: { x: 5.58, z: r101.doorZ, yaw: Math.PI }
   });
   const p = player(5.58, r101.doorZ - 2.8);

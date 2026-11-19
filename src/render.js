@@ -14,6 +14,9 @@ const worldVertex = `
   varying vec3 surfaceNormal;
   varying vec2 texCoord;
   varying vec3 paint;
+  #ifdef FACE_MOSAIC
+  varying vec3 headPoint;
+  #endif
   #ifdef TORN_SLEEVE
   attribute vec4 tearCoord;
   varying vec4 tubePoint;
@@ -55,6 +58,9 @@ const worldVertex = `
     surfaceNormal = mat3(modelMatrix) * objectNormal;
     texCoord = uv;
     paint = color;
+    #ifdef FACE_MOSAIC
+    headPoint = position;
+    #endif
     gl_Position = projectionMatrix * viewMatrix * world;
     #endif
   }
@@ -83,6 +89,11 @@ const worldFragment = `
   uniform float isMonster;
   uniform float monsterLight;
   uniform float time;
+  uniform float dawn;
+  uniform float bloodSky;
+  uniform vec3 playerTorchPos;
+  uniform vec3 playerTorchDir;
+  uniform float playerTorchPower;
   uniform vec4 pupilLights[2];
   #ifdef EMISSIVE_MAP
   uniform sampler2D emissiveMap;
@@ -95,6 +106,9 @@ const worldFragment = `
   varying vec3 surfaceNormal;
   varying vec2 texCoord;
   varying vec3 paint;
+  #ifdef FACE_MOSAIC
+  varying vec3 headPoint;
+  #endif
   #ifdef TORN_SLEEVE
   varying vec4 tubePoint;
   uniform float garmentWear;
@@ -177,8 +191,11 @@ const worldFragment = `
   void main() {
     #ifdef SKYBOX
     vec3 dir = normalize(worldPos - cameraPosition);
-    vec3 skyHorizon = vec3(0.032, 0.052, 0.082);
-    vec3 skyZenith = vec3(0.008, 0.014, 0.028);
+    float bSky = clamp(bloodSky, 0.0, 1.0);
+    vec3 skyHorizon = mix(vec3(0.032, 0.052, 0.082), vec3(0.28, 0.022, 0.024), bSky);
+    vec3 skyZenith = mix(vec3(0.008, 0.014, 0.028), vec3(0.060, 0.004, 0.008), bSky);
+    skyHorizon = mix(skyHorizon, vec3(.98,.57,.35), dawn);
+    skyZenith = mix(skyZenith, vec3(.18,.32,.49), dawn);
     vec3 sky = mix(skyHorizon, skyZenith, smoothstep(0.0, 0.72, max(dir.y, 0.0)));
 
     vec2 cloudUv = dir.xz / (max(dir.y, 0.05) + 0.45) * 0.28;
@@ -187,8 +204,9 @@ const worldFragment = `
     float cloudLum = clamp(dot(cloudA + cloudB, vec3(0.299, 0.587, 0.114)) * 0.5, 0.0, 1.0);
     float cloudCover = smoothstep(0.07, 0.18, cloudLum);
     float cloudMask = smoothstep(0.02, 0.24, dir.y);
-    vec3 cloudCol = (cloudA * 0.55 + cloudB * 0.45) * vec3(1.15, 1.35, 1.60) * (0.75 + 0.35 * windowGlow);
-    sky = mix(sky, max(sky, cloudCol), cloudMask * 0.52);
+    vec3 cloudTint = mix(vec3(1.15, 1.35, 1.60), vec3(2.20, 0.34, 0.28), bSky);
+    vec3 cloudCol = (cloudA * 0.55 + cloudB * 0.45) * cloudTint * (0.75 + 0.35 * windowGlow + 0.45 * bSky);
+    sky = mix(sky, max(sky, cloudCol), cloudMask * mix(0.52, 0.76, bSky));
 
     vec3 skyMoonDir = normalize(vec3(0.46, 0.33, -0.82));
     float moonCos = max(dot(dir, skyMoonDir), 0.0);
@@ -204,8 +222,8 @@ const worldFragment = `
     float starBright = step(0.955, sh) * (1.0 - smoothstep(0.05, 0.24, starDist));
     float starMask = smoothstep(0.06, 0.35, dir.y) * (1.0 - cloudCover * 0.72) * moonMask;
     float twinkle = 0.75 + 0.25 * sin(time * (1.4 + sh2 * 2.2) + sh * 40.0);
-    vec3 starTint = mix(vec3(0.55, 0.70, 0.90), vec3(0.85, 0.92, 1.0), sh2);
-    sky += starTint * starBright * twinkle * starMask * 0.52 * (0.65 + 0.35 * windowGlow);
+    vec3 starTint = mix(mix(vec3(0.55, 0.70, 0.90), vec3(0.85, 0.92, 1.0), sh2), vec3(0.95, 0.35, 0.30), bSky);
+    sky += (1.0 - dawn) * starTint * starBright * twinkle * starMask * 0.52 * (0.65 + 0.35 * windowGlow);
 
     vec3 moonUp = normalize(cross(vec3(0.0, 1.0, 0.0), skyMoonDir));
     vec3 moonRight = cross(skyMoonDir, moonUp);
@@ -214,12 +232,12 @@ const worldFragment = `
     float moonDisc = smoothstep(0.9989, 0.9994, moonCos);
     float safeMoonCos = max(moonCos, 0.0001);
     float moonHalo = pow(safeMoonCos, 38.0) * 0.22 + pow(safeMoonCos, 8.0) * 0.06;
-    float moonVis = (1.0 - cloudCover * 0.45) * (0.65 + 0.35 * windowGlow);
-    sky += vec3(0.18, 0.28, 0.38) * moonHalo * moonVis;
-    sky = mix(sky, vec3(0.72, 0.80, 0.88) * maria * moonVis, moonDisc);
+    float moonVis = (1.0 - cloudCover * 0.45) * (0.65 + 0.35 * windowGlow + 0.35 * bSky);
+    sky += mix(vec3(0.18, 0.28, 0.38), vec3(0.68, 0.08, 0.06), bSky) * moonHalo * moonVis;
+    sky = mix(sky, mix(vec3(0.72, 0.80, 0.88), vec3(0.96, 0.22, 0.16), bSky) * maria * moonVis, moonDisc);
 
     float horizonMist = 1.0 - smoothstep(-0.02, 0.14, dir.y);
-    sky = mix(sky, vec3(0.018, 0.030, 0.042), horizonMist * 0.92);
+    sky = mix(sky, mix(vec3(0.018, 0.030, 0.042), vec3(0.105, 0.014, 0.015), bSky), horizonMist * 0.92);
     gl_FragColor = vec4(sky, 1.0);
     #else
     #ifdef FELT_CUT
@@ -243,10 +261,19 @@ const worldFragment = `
     #ifdef ALPHA_TEXTURE
     if (texel.a < 0.04) discard;
     #endif
+    #ifdef FACE_MOSAIC
+    // Cells follow the head as it turns. Their values contain no face data.
+    vec2 cell = floor(vec2(atan(headPoint.x, headPoint.z + 0.0001) * 3.6, headPoint.y / 7.0));
+    float value = fract(sin(dot(cell, vec2(41.13, 19.27))) * 9738.51);
+    float band = floor(value * 5.0) * 0.25;
+    vec3 base = mix(vec3(0.095, 0.102, 0.106), vec3(0.82, 0.81, 0.77), band);
+    #else
     vec3 base = texel.rgb * paint;
+    #endif
+    float bSkyWorld = clamp(bloodSky, 0.0, 1.0);
     if (isWindow > 0.5) {
-      vec3 nightBase = base * vec3(0.28, 0.42, 0.52);
-      base = mix(nightBase, base, windowGlow);
+      vec3 nightBase = mix(base * vec3(0.28, 0.42, 0.52), base * vec3(0.88, 0.16, 0.14), bSkyWorld);
+      base = mix(nightBase, mix(base, base * vec3(1.15, 0.35, 0.32), bSkyWorld), windowGlow);
     }
     #ifdef TORN_HEM
     float tornHem = hemEdge();
@@ -517,11 +544,33 @@ const worldFragment = `
       borrowed = max(borrowed, 1.0 - smoothstep(0.0, 3.1, length(vec2(worldPos.x - opening.x, along))));
     }
     float inPlazaOpen = plazaBaseMask * (1.0 - max(max(inside103, inside106), inside107));
-    light += vec3(0.024, 0.058, 0.085) * borrowed * windowGlow * max(inCorridorX * inHallZ, inPlazaOpen * 0.70);
-    light += vec3(0.016, 0.036, 0.054) * windowGlow * inPlazaOpen * 0.55;
+    vec3 windowCool = mix(vec3(0.024, 0.058, 0.085), vec3(0.22, 0.024, 0.024), bSkyWorld);
+    vec3 plazaCool = mix(vec3(0.016, 0.036, 0.054), vec3(0.14, 0.018, 0.018), bSkyWorld);
+    light += windowCool * borrowed * max(windowGlow, bSkyWorld * 0.65) * max(inCorridorX * inHallZ, inPlazaOpen * 0.70);
+    light += plazaCool * max(windowGlow, bSkyWorld * 0.65) * inPlazaOpen * 0.55;
     vec3 moonDir = normalize(vec3(-0.38, 0.56, -0.46));
     float moonNdl = 0.48 + 0.52 * max(dot(n, moonDir), 0.0);
-    light += vec3(0.045, 0.068, 0.090) * moonNdl * (0.60 + 0.40 * windowGlow) * inPlazaOpen;
+    vec3 moonTint = mix(vec3(0.045, 0.068, 0.090), vec3(0.26, 0.028, 0.026), bSkyWorld);
+    light += moonTint * moonNdl * (0.60 + 0.40 * max(windowGlow, bSkyWorld)) * inPlazaOpen;
+    if (worldPos.z > 19.6 && inPlazaOpen > 0.1) {
+      for (int s = 0; s < 2; s++) {
+        float lz = s == 0 ? 27.5 : 37.5;
+        vec3 ld1 = vec3(-12.2 - worldPos.x, 3.4 - worldPos.y, lz - worldPos.z);
+        vec3 ld2 = vec3(-19.8 - worldPos.x, 3.4 - worldPos.y, lz - worldPos.z);
+        float p1 = 2.6 / (3.2 + dot(ld1, ld1));
+        float p2 = 2.6 / (3.2 + dot(ld2, ld2));
+        light += vec3(0.95, 0.78, 0.48) * (p1 + p2) * inPlazaOpen;
+      }
+    }
+    if (playerTorchPower > 0.001) {
+      vec3 td = worldPos - playerTorchPos;
+      float tDist = length(td);
+      vec3 tDir = td / max(tDist, 0.0001);
+      float cone = smoothstep(0.75, 0.96, dot(tDir, normalize(playerTorchDir)));
+      float tAtten = 1.0 / (1.0 + tDist * tDist * 0.085);
+      float tNdl = mix(0.22, 1.0, max(dot(n, -tDir), 0.0));
+      light += vec3(0.92, 0.96, 1.0) * cone * tAtten * tNdl * playerTorchPower * 1.15;
+    }
     float annexLitAmt = clamp(extraStrips[ROOM_COUNT].z, 0.0, 1.0);
     float annexOpenFade = 1.0 - 0.75 * smoothstep(0.0, 0.48, doorOpenings[ROOM_COUNT].z);
     float endGlow = (1.0 - smoothstep(0.15, 4.2, abs(worldPos.z - room.z))) * (1.0 - smoothstep(1.25, 2.55, abs(worldPos.x)));
@@ -606,7 +655,9 @@ const worldFragment = `
     #endif
     float dist = length(cameraPosition - worldPos);
     vec3 fogCol = mix(vec3(0.067, 0.105, 0.117), vec3(0.017, 0.029, 0.030), eerieTint);
-    fogCol = mix(fogCol, vec3(0.018, 0.030, 0.042), inPlazaOpen * 0.70);
+    vec3 plazaFogCol = mix(vec3(0.018, 0.030, 0.042), vec3(0.088, 0.014, 0.015), bSkyWorld);
+    fogCol = mix(fogCol, plazaFogCol, inPlazaOpen * 0.72);
+    fogCol = mix(fogCol, vec3(0.062, 0.010, 0.012), bSkyWorld * 0.45 * (1.0 - inPlazaOpen));
     float k = 0.00049 * (0.35 + 2.45 * fogDensity) * mix(1.0, 0.78, inPlazaOpen);
     float haze = 1.0 - exp(-k * dist * dist);
     float glowPierce = 0.0;
@@ -641,6 +692,9 @@ const screenFragment = `
   uniform float hazardMotion;
   uniform vec2 hazardBearing;
   uniform float hazardSide;
+  uniform float flashBurst;
+  uniform float adrenalineFx;
+  uniform float bloodSky;
   #define HZ_INNER ${SCREEN_FX_MASK.inner.toFixed(3)}
   #define HZ_OUTER ${SCREEN_FX_MASK.outer.toFixed(3)}
   #define HZ_X ${SCREEN_FX_MASK.xCompression.toFixed(3)}
@@ -810,6 +864,17 @@ const screenFragment = `
       float noise = fract(sin(dot(gl_FragCoord.xy + vec2(fract(time * 0.37) * 97.0, fract(time * 0.61) * 53.0), vec2(12.9898, 78.233))) * 43758.5453);
       c += (noise - 0.5) * 0.042 * grainAmount;
     }
+    if (bloodSky > 0.01) {
+      float bAmt = clamp(bloodSky, 0.0, 1.0);
+      c = mix(c, c * vec3(1.08, 0.88, 0.88), rim * bAmt * 0.38);
+      c += vec3(0.045, 0.003, 0.004) * rim * bAmt;
+    }
+    if (adrenalineFx > 0.005) {
+      c += vec3(0.03, 0.16, 0.14) * rim * clamp(adrenalineFx, 0.0, 1.0) * 0.48;
+    }
+    if (flashBurst > 0.002) {
+      c = mix(c, vec3(0.95, 0.99, 1.0), clamp(flashBurst * 0.88, 0.0, 0.92));
+    }
     c = mix(c, floor(clamp(c, 0.0, 1.0) * 48.0 + bayer(gl_FragCoord.xy)) / 48.0, 0.70);
     gl_FragColor = vec4(c, 1.0);
   }
@@ -847,6 +912,12 @@ export function makeRenderer(canvas) {
   const vignetteAmount = { value: 0.28 };
   const grainAmount = { value: 0.42 };
   const monsterLight = { value: 1.45 };
+  const bloodSky = { value: 0 }, dawn = { value: 0 };
+  const playerTorchPos = { value: new Vector3(0, 1.61, 0) };
+  const playerTorchDir = { value: new Vector3(0, 0, -1) };
+  const playerTorchPower = { value: 0 };
+  const flashBurst = { value: 0 };
+  const adrenalineFx = { value: 0 };
   const pupilLights = { value: [new Vector4(0, -99, 0, 0), new Vector4(0, -99, 0, 0)] };
   const time = { value: 0 };
   const hazardDanger = { value: 0 };
@@ -862,7 +933,7 @@ export function makeRenderer(canvas) {
   const quad = new Mesh(new PlaneGeometry(2, 2), new ShaderMaterial({
     uniforms: {
       frame: { value: target.texture }, resolution, sprintCloud, headBlur,
-      vignetteAmount, grainAmount, eerieTint, time,
+      vignetteAmount, grainAmount, eerieTint, time, bloodSky, flashBurst, adrenalineFx,
       hazardDanger, hazardChase, hazardGrip, hazardFear, hazardFade, hazardMotion, hazardBearing, hazardSide
     },
     vertexShader: 'varying vec2 coord; void main() { coord = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
@@ -874,7 +945,7 @@ export function makeRenderer(canvas) {
   function material(texture, {
     emission = 0, floor = false, repeat, window = false, lampIndex = -1, monster = false,
     shininess = 0, opacity = 1, alphaTexture = false, emissiveMap = null, emissivePower = 1,
-    skybox = false
+    skybox = false, faceMosaic = false
   } = {}) {
     const defines = {
       LAMP_COUNT: lights.length,
@@ -891,12 +962,14 @@ export function makeRenderer(canvas) {
     };
     if (alphaTexture) defines.ALPHA_TEXTURE = 1;
     if (skybox) defines.SKYBOX = 1;
+    if (faceMosaic) defines.FACE_MOSAIC = 1;
     const isFloor = Boolean(floor && !skybox);
     const uniforms = {
       strips, extraStrips, doorOpenings, roomBounds, plazaPortal, outerWindows, room, benchCenter: { value: benchZ },
       surfaceMap: { value: texture }, selfLight: { value: emission }, tileFloor: { value: Number(isFloor) },
       shininess: { value: shininess }, opacity: { value: opacity },
       ambientLevel, eerieTint, fogDensity, windowGlow, monsterLight, pupilLights, time,
+      bloodSky, dawn, playerTorchPos, playerTorchDir, playerTorchPower,
       isWindow: { value: Number(window) }, lampIndex: { value: lampIndex }, isMonster: { value: Number(monster) }
     };
     if (emissiveMap) {
@@ -928,6 +1001,10 @@ export function makeRenderer(canvas) {
     camera.updateProjectionMatrix();
   }
 
+  function compile(scene, camera) {
+    if (typeof renderer.compile === 'function') renderer.compile(scene, camera);
+  }
+
   function draw(scene, camera, screenFx = null) {
     const fx = camera.userData?.postFx;
     sprintCloud.value = fx ? fx.sprintCloud : 0;
@@ -949,7 +1026,9 @@ export function makeRenderer(canvas) {
     renderer.render(screen, screenCamera);
   }
   const environment = {
-    strips, extraStrips, doorOpenings, ambientLevel, eerieTint, fogDensity, windowGlow, vignetteAmount, grainAmount, monsterLight, pupilLights, time
+    strips, extraStrips, doorOpenings, ambientLevel, eerieTint, fogDensity, windowGlow,
+    vignetteAmount, grainAmount, monsterLight, pupilLights, time,
+    bloodSky, dawn, playerTorchPos, playerTorchDir, playerTorchPower, flashBurst, adrenalineFx
   };
-  return { material, resize, draw, environment };
+  return { material, resize, compile, draw, environment };
 }

@@ -511,3 +511,44 @@ export function makeTextures() {
   };
 }
 
+export async function makeTexturesAsync(onProgress = () => {}, yieldStep = () => new Promise(r => setTimeout(r, 0))) {
+  const jobs = [
+    ['white', () => canvasTexture(1, 1, c => fill(c, '#fff', 0, 0, 1, 1))],
+    ['floor', floorTiles],
+    ['ceiling', ceiling],
+    ['wood', wood],
+    ['plaster', () => canvasTexture(256, 256, (c, w, h) => patina(c, w, h, [197, 196, 178], 17, 910), true)],
+    ['paint', paintedWall],
+    ['glass', () => wiredGlass(false)],
+    ['amberGlass', () => wiredGlass(true)],
+    ['win0', () => campusWindow(81)],
+    ['win1', () => campusWindow(910)],
+    ['directory', directory],
+    ['bulletin', bulletin],
+    ['exit', exitSign],
+    ['fire', fireSign],
+    ['chalkboard', chalkboard],
+    ['crtScreen', crtScreen],
+    ['breakerPanel', breakerPanel],
+    ['drawingSheet', drawingSheet],
+    ['scopeScreen', scopeScreen],
+    ['plazaPavement', plazaPavement],
+    ['bark', bark],
+    ['foliage', foliage],
+    ['nightSky', nightSky],
+    ['securityMonitor', securityMonitor]
+  ];
+  const built = {};
+  for (let i = 0; i < jobs.length; i++) {
+    const [key, fn] = jobs[i];
+    built[key] = fn();
+    onProgress((i + 1) / jobs.length);
+    if (i % 3 === 2) await yieldStep();
+  }
+  built.windows = [built.win0, built.win1];
+  delete built.win0;
+  delete built.win1;
+  return built;
+}
+
+

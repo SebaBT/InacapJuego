@@ -322,6 +322,7 @@ export function createDoorController({ doors = [], switches = [], atmosphere = n
     }
 
     for (const door of doors) {
+      if (door.breached) continue;
       const openPts = door.open > 0.5 ? getOpenTargetPoints(door) : [];
       const points = openPts.length ? [door.pos, ...openPts] : [door.pos];
       for (const pt of points) {
@@ -557,6 +558,7 @@ export function createDoorController({ doors = [], switches = [], atmosphere = n
 
   function update(dt, pose, active = true) {
     const safeDt = clamp(dt, 0, 0.1);
+    if (activeAction?.door?.breached) activeAction = null;
     if (retreatCooldown > 0) retreatCooldown = Math.max(0, retreatCooldown - safeDt);
     if (noteTimer > 0) {
       noteTimer = Math.max(0, noteTimer - safeDt);
@@ -575,6 +577,7 @@ export function createDoorController({ doors = [], switches = [], atmosphere = n
       const driveSpeed = useWish ? Math.max(actualSpeed, wishSpeed) : actualSpeed;
       if ((useWish || actualSpeed >= 2.85) && driveSpeed > 1.8) {
         for (const door of doors) {
+          if (door.breached) continue;
           if (door === monsterDoor) continue;
           if (door.locked) {
             if (door.open >= 0.22 || !door.threshold) continue;
@@ -684,6 +687,7 @@ export function createDoorController({ doors = [], switches = [], atmosphere = n
     }
 
     for (const door of doors) {
+      if (door.breached) continue;
       const prevOpen = door.open;
       const diff = door.targetOpen - door.open;
       const isGrabbingDoor = activeAction?.kind === 'grab' && activeAction.door === door && !activeAction.releasing;

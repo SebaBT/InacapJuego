@@ -197,7 +197,10 @@ export function movePlayer(p, dx, dz, obstacles, footY = 0, bounds = null, playe
   p.z = curZ;
 }
 
-export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInteract, onStickDirection, isInspecting = () => false, debris = null, audio: customAudio = null } = {}) {
+export function firstPerson(camera, obstacles, wake, {
+  onBegin, onPause, onInteract, onUseItem, onSelectSlot, onCycleSlot, onSkipCinematic,
+  onStickDirection, isInspecting = () => false, debris = null, audio: customAudio = null
+} = {}) {
   const game = document.querySelector('#game'), canvas = document.querySelector('#view');
   const enter = document.querySelector('#enter'), label = document.querySelector('#enter-label');
   const message = document.querySelector('#message'), stick = document.querySelector('#stick');
@@ -219,6 +222,7 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
   let lastEyeY = eyeHeight, prevMoveSpeed = 0, prevVx = 0, prevVz = 0, stepClimbCooldown = 0, scuffCooldown = 0;
   let currentSurface = { surface: 'tile', debris: null };
   let fear = 0, fearArmed = true, fearGaspCooldown = 0;
+  let adrenaline = false, cutsceneLock = false;
 
   const stamina = createStaminaState();
   const jump = createJumpState();
@@ -342,7 +346,8 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
       const showBar = active && !noclip && (stamina.hudVisibleTimer > 0 || stamina.isSprinting || stamina.exhausted);
       sprintBar.classList.toggle('visible', showBar);
       sprintBar.classList.toggle('exhausted', active && !noclip && stamina.exhausted);
-      sprintFill.style.transform = 'scaleX(' + stamina.stamina.toFixed(4) + ')';
+      const reading = stamina.exhausted ? 'Sin aguante' : 'Aguante ' + Math.ceil(stamina.stamina * 10) * 10 + ' %';
+      if (showBar && sprintFill.textContent !== reading) sprintFill.textContent = reading;
     }
     const showFx = active && !noclip;
     const blinkVal = showFx ? blink.amount * (1 - lastCam.blend) : 0;
@@ -498,11 +503,41 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
   }
   function restartAt(x, z) {
     setCaptured(false);
+    adrenaline = false;
+    cutsceneLock = false;
+    touchCrouch = false;
+    clearInputs();
+    syncCrouch();
     Object.assign(stamina, createStaminaState());
     Object.assign(jump, createJumpState());
     Object.assign(blink, createBlinkState());
     Object.assign(motion, createCameraMotionState());
     setView(x, z, 0, 0);
+  }
+  function refillStamina() {
+    stamina.stamina = 1;
+    stamina.exhausted = false;
+    stamina.recoveryDelay = 0;
+    stamina.recoveryTime = 0;
+    stamina.hudVisibleTimer = 1.25;
+    updateHud();
+  }
+  function setAdrenaline(enabled) {
+    adrenaline = Boolean(enabled);
+    if (adrenaline) {
+      stamina.exhausted = false;
+      stamina.recoveryDelay = 0;
+    }
+  }
+  function setCutsceneLock(enabled) {
+    cutsceneLock = Boolean(enabled);
+    if (cutsceneLock) {
+      clearInputs();
+      vx = 0; vy = 0; vz = 0; wishVx = 0; wishVz = 0;
+      noiseRadius = 0;
+      audio.silence();
+      resetEffects(false);
+    }
   }
   function monsterStep(strength, side) {
     if (!active || noclip || captured || reducedMotion.matches) return;
@@ -554,7 +589,7 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
     const wasInspecting = isInspecting();
     onBegin?.();
     syncCrouch();
-    applyPose(0, wasInspecting);
+    if (!cutsceneLock) applyPose(0, wasInspecting);
     game.classList.add('playing');
     enter.disabled = true;
     audio.unlock();
@@ -574,17 +609,17 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
     clearInputs(); lookId = null;
     resetEffects(!noclip);
     game.classList.remove('playing', 'drag-look');
-    message.textContent = '';
+    if (message) message.textContent = '';
     clearTimeout(messageTimer);
-    label.textContent = 'Continuar recorrido';
+    if (label) label.textContent = 'Continuar';
     enter.disabled = false;
     if (document.pointerLockElement === canvas) document.exitPointerLock();
     enter.focus();
-    applyPose(0, false);
+    if (!cutsceneLock && !captured) applyPose(0, false);
     wake();
   }
   function look(dx, dy, speed) {
-    if (captured) return;
+    if (captured || cutsceneLock) return;
     const oldPitch = pitch;
     const dYaw = -dx * speed;
     yaw = (yaw + dYaw) % (Math.PI * 2);
@@ -643,9 +678,34 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
       enter.click();
       return;
     }
+    if (active && cutsceneLock) {
+      if (!e.repeat && (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Escape')) {
+        e.preventDefault();
+        onSkipCinematic?.();
+      }
+      return;
+    }
     if (active && e.code === 'Escape') { e.preventDefault(); pause(); return; }
     if (captured) return;
     if (active && e.code === 'KeyE' && !e.repeat) { e.preventDefault(); audio.unlock(); onInteract?.(); return; }
+    if (active && !noclip && e.code === 'KeyF' && !e.repeat) {
+      e.preventDefault();
+      audio.unlock();
+      (onUseItem || onInteract)?.();
+      return;
+    }
+    if (active && !noclip && e.code === 'KeyQ' && !e.repeat) {
+      e.preventDefault();
+      audio.unlock();
+      onCycleSlot?.(1);
+      return;
+    }
+    if (active && !noclip && /^Digit[1-6]$/.test(e.code) && !e.repeat) {
+      e.preventDefault();
+      audio.unlock();
+      onSelectSlot?.(Number(e.code.slice(5)) - 1);
+      return;
+    }
     if (active && !noclip && e.code === 'KeyV' && !e.repeat) { e.preventDefault(); toggleThirdPerson(); return; }
     if (active && e.code === 'KeyB' && !e.repeat) { manualBlink = true; return; }
     if (active && !noclip && e.code === 'Space') {
@@ -662,6 +722,11 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
       audio.unlock();
     }
   });
+  window.addEventListener('wheel', e => {
+    if (!active || cutsceneLock || captured || noclip) return;
+    if (Math.abs(e.deltaY) < 4) return;
+    onCycleSlot?.(e.deltaY > 0 ? 1 : -1);
+  }, { passive: true });
   window.addEventListener('keyup', e => {
     if (keys.delete(e.code) && e.code === 'KeyC') syncCrouch();
   });
@@ -671,16 +736,20 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
   canvas.addEventListener('pointerdown', e => {
     if (e.button !== 0) return;
     if (!active) begin(e);
-    else {
+    else if (cutsceneLock) {
       audio.unlock();
-      if (locked && !captured) onInteract?.();
+      onSkipCinematic?.();
+      return;
+    } else {
+      audio.unlock();
+      if (locked && !captured) (onUseItem || onInteract)?.();
     }
     if (lookId !== null || (!dragMode && e.pointerType !== 'touch')) return;
     lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY;
     canvas.setPointerCapture(lookId);
   });
   canvas.addEventListener('pointermove', e => {
-    if (!active || locked || e.pointerId !== lookId) return;
+    if (!active || cutsceneLock || locked || e.pointerId !== lookId) return;
     look(e.clientX - lastX, e.clientY - lastY, e.pointerType === 'touch' ? .0044 : .0037);
     lastX = e.clientX; lastY = e.clientY;
   });
@@ -692,7 +761,7 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
   }
 
   function update(dt) {
-    if (!active || captured) return;
+    if (!active || captured || cutsceneLock) return;
     stompAge += dt;
     doorStepVx = 0;
     doorStepVz = 0;
@@ -726,7 +795,8 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
       sprinting: wantsSprint && jump.stumbleCooldown <= 0.6,
       crouching: isCrouching,
       moving: inputMag > 0.05,
-      dt
+      dt,
+      adrenaline
     });
 
     // A sudden terror spike (spotting the monster up close) tears out a gasp,
@@ -950,10 +1020,12 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
   return {
     audio,
     get active() { return active; },
+    get cutsceneLock() { return cutsceneLock; },
+    get adrenaline() { return adrenaline; },
     get noclip() { return noclip; },
     get thirdPerson() { return thirdPersonState.enabled; },
     get animating() {
-      return !captured && isThirdPersonTransitioning(thirdPersonState, {
+      return !captured && !cutsceneLock && isThirdPersonTransitioning(thirdPersonState, {
         allowed: !noclip && !isInspecting(),
         reducedMotion: reducedMotion.matches,
         yaw
@@ -1007,6 +1079,9 @@ export function firstPerson(camera, obstacles, wake, { onBegin, onPause, onInter
     setFear,
     setCaptured,
     restartAt,
+    refillStamina,
+    setAdrenaline,
+    setCutsceneLock,
     applyDoorFollow,
     pause,
     setView

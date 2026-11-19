@@ -35,15 +35,16 @@ export function createStaminaState() {
   };
 }
 
-export function stepStamina(state, { sprinting = false, crouching = false, moving = false, dt = 0 } = {}) {
+export function stepStamina(state, { sprinting = false, crouching = false, moving = false, dt = 0, adrenaline = false } = {}) {
   const safeDt = Math.max(0, dt);
-  const canSprint = !crouching && !state.exhausted && state.stamina > 0;
+  if (adrenaline) state.exhausted = false;
+  const canSprint = !crouching && (adrenaline || (!state.exhausted && state.stamina > 0));
   const activeSprint = Boolean(sprinting && moving && canSprint);
 
   state.justExhausted = false;
   state.isSprinting = activeSprint;
 
-  if (activeSprint) {
+  if (activeSprint && !adrenaline) {
     state.stamina = Math.max(0, state.stamina - 0.125 * safeDt);
     state.recoveryDelay = 0.40;
     state.recoveryTime = 0;
@@ -57,12 +58,14 @@ export function stepStamina(state, { sprinting = false, crouching = false, movin
     state.exertion = clamp(state.exertion + 0.42 * safeDt, 0, 1);
   } else {
     let regenDt = safeDt;
-    if (state.recoveryDelay > 0) {
+    if (state.recoveryDelay > 0 && !adrenaline) {
       regenDt = Math.max(0, safeDt - state.recoveryDelay);
       state.recoveryDelay = Math.max(0, state.recoveryDelay - safeDt);
+    } else if (adrenaline) {
+      state.recoveryDelay = 0;
     }
     if (regenDt > 0 && state.stamina < 1) {
-      const baseRate = (moving ? 0.095 : 0.145) * (state.exhausted ? 0.85 : 1);
+      const baseRate = (moving ? 0.095 : 0.145) * (state.exhausted ? 0.85 : 1) * (adrenaline ? 1.45 : 1);
       const expK = 0.65;
       const maxBoostTime = 3.2;
       const t0 = Math.min(state.recoveryTime, maxBoostTime);
@@ -82,7 +85,7 @@ export function stepStamina(state, { sprinting = false, crouching = false, movin
       state.recoveryTime = 0;
     }
 
-    if (state.stamina < 0.999 || state.exhausted) {
+    if (adrenaline || state.stamina < 0.999 || state.exhausted) {
       state.hudVisibleTimer = 0.85;
     } else {
       state.hudVisibleTimer = Math.max(0, state.hudVisibleTimer - safeDt);
@@ -90,7 +93,7 @@ export function stepStamina(state, { sprinting = false, crouching = false, movin
 
     const exertionTarget = state.exhausted
       ? Math.max(0.76, 1 - state.stamina)
-      : (moving ? 0.15 : 0);
+      : (activeSprint ? 0.45 : moving ? 0.15 : 0);
     const rate = exertionTarget > state.exertion ? 0.55 : 0.34;
     const diff = exertionTarget - state.exertion;
     const step = rate * safeDt;
@@ -100,12 +103,12 @@ export function stepStamina(state, { sprinting = false, crouching = false, movin
   if (crouching) {
     state.speedLimit = CROUCH_SPEED;
   } else if (state.isSprinting) {
-    state.speedLimit = SPRINT_SPEED;
+    state.speedLimit = adrenaline ? SPRINT_SPEED * 1.12 : SPRINT_SPEED;
   } else if (state.exhausted) {
     const recoveryRatio = clamp(state.stamina / EXHAUSTION_RECOVER_THRESHOLD, 0, 1);
     state.speedLimit = EXHAUSTED_WALK_SPEED + (WALK_SPEED - EXHAUSTED_WALK_SPEED) * recoveryRatio;
   } else {
-    state.speedLimit = WALK_SPEED;
+    state.speedLimit = adrenaline ? WALK_SPEED * 1.08 : WALK_SPEED;
   }
 
   return state;

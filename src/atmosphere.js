@@ -136,6 +136,9 @@ export function createAtmosphereState(fixtures = defaultLights, presetName = 'te
     time: 0,
     surgeWave: -1,
     arcEnergy: 0,
+    dawn: 0,
+    bloodSky: 0,
+    targetBloodSky: 0,
     lamps,
     extraLamps
   };
@@ -167,6 +170,11 @@ export function stepAtmosphere(state, dt = 0, { reducedMotion = false } = {}) {
   const safeDt = clamp(dt, 0, 0.1);
   const s = state.settings;
   state.time += safeDt;
+
+  if (typeof state.targetBloodSky === 'number') {
+    const rate = reducedMotion ? 1 : 1 - Math.exp(-1.6 * safeDt);
+    state.bloodSky = lerp(state.bloodSky || 0, state.targetBloodSky, rate);
+  }
 
   if (state.surgeWave >= 0) {
     state.surgeWave += safeDt * 1.45;
@@ -330,6 +338,7 @@ export function stepAtmosphere(state, dt = 0, { reducedMotion = false } = {}) {
 }
 
 export function isAtmosphereAnimating(state, reducedMotion = false) {
+  if (Math.abs((state.bloodSky || 0) - (state.targetBloodSky || 0)) > 0.005) return true;
   if (!state.flickerEnabled) return state.surgeWave >= 0;
   if (reducedMotion && !state.allowReducedMotionFlicker) return false;
   if (state.surgeWave >= 0) return true;
@@ -490,6 +499,8 @@ export function createAtmosphere(fixtures = defaultLights, extraFixtures = defau
     env.vignetteAmount.value = s.vignette;
     env.grainAmount.value = s.grain;
     if (env.monsterLight) env.monsterLight.value = s.monsterLight;
+    if (env.dawn) env.dawn.value = state.dawn;
+    if (env.bloodSky) env.bloodSky.value = state.bloodSky || 0;
     env.time.value = state.time;
 
     const strips = env.strips.value;
@@ -526,12 +537,67 @@ export function createAtmosphere(fixtures = defaultLights, extraFixtures = defau
     return lamp.switchedOn;
   }
 
+  function triggerPointOfNoReturn() {
+    triggerAtmosphereSurge(state);
+    state.targetBloodSky = 1;
+    state.settings.ambient = 0.065;
+    state.settings.lampPower = 0.06;
+    state.settings.eerieTint = 1.0;
+    state.settings.fogDensity = 1.42;
+    state.settings.windowGlow = 0.45;
+    state.settings.monsterLight = 2.15;
+    state.settings.vignette = 0.42;
+    state.settings.grain = 0.72;
+    for (const lamp of state.lamps) {
+      lamp.mode = 'off';
+    }
+    for (const lamp of state.extraLamps || []) {
+      lamp.switchedOn = false;
+      lamp.mode = 'off';
+    }
+  }
+
+  function triggerDawnVictory() {
+    state.targetBloodSky = 0;
+    state.settings.ambient = 0.52;
+    state.settings.eerieTint = 0.18;
+    state.settings.fogDensity = 0.48;
+    state.settings.windowGlow = 0.92;
+  }
+
+  function reset() {
+    applyAtmospherePreset(state, 'tetrica');
+    state.dawn = 0;
+    state.bloodSky = 0;
+    state.targetBloodSky = 0;
+    state.surgeWave = -1;
+    state.arcEnergy = 0;
+    state.lamps.forEach((lamp, i) => {
+      lamp.mode = 'auto';
+      lamp.phase = i === 2 ? 'dark' : 'steady';
+      lamp.power = lamp.basePower * state.settings.lampPower;
+      lamp.level = lamp.power;
+    });
+    (state.extraLamps || []).forEach((lamp, i) => {
+      const def = extraFixtures?.[i];
+      const defaultOn = def ? def.defaultOn !== false : true;
+      lamp.switchedOn = defaultOn;
+      lamp.mode = defaultOn ? 'auto' : 'off';
+      lamp.phase = defaultOn ? 'steady' : 'dark';
+      lamp.power = defaultOn ? lamp.basePower * state.settings.lampPower : 0;
+      lamp.level = lamp.power;
+    });
+  }
+
   return {
     state,
     audio,
     apply,
     setPreset(name) { applyAtmospherePreset(state, name); },
     surge() { triggerAtmosphereSurge(state); },
+    triggerPointOfNoReturn,
+    triggerDawnVictory,
+    reset,
     cycleLamp(index) {
       const lamp = state.lamps[index];
       if (!lamp) return;

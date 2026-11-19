@@ -138,7 +138,7 @@ function raycastCircle2D(ox, oz, dx, dz, cx, cz, radius) {
   return t >= 0 && t <= 1 ? t : 1;
 }
 
-function raycastCapsule2D(ox, oz, dx, dz, ax, az, bx, bz, radius) {
+export function raycastCapsule2D(ox, oz, dx, dz, ax, az, bx, bz, radius) {
   const sx = bx - ax;
   const sz = bz - az;
   const sLenSq = sx * sx + sz * sz;

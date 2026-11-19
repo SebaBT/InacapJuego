@@ -369,6 +369,11 @@ export function applyStreetPassPose(bones, pose) {
       ry = lerp(ry, targetY, door.rightWeight);
       rz = lerp(rz, targetZ, door.rightWeight);
       rrx = lerp(rrx, -0.45, door.rightWeight);
+    } else if (pose.heldItem) {
+      rx += 4.0;
+      ry += 7.5;
+      rz += 18.0;
+      rrx -= 0.25;
     }
     bones.handRPs.position.set(rx, ry, rz);
     bones.handRPs.rotation.set(rrx, 0, 0);
@@ -676,6 +681,10 @@ export function applySwitchPose(bones, pose) {
   }
   if (bones.wrist_l) bones.wrist_l.rotation.set(0, 0, 0);
   if (bones.wrist_r) bones.wrist_r.rotation.set(0, 0, 0);
+  if (pose.heldItem && !door) {
+    if (bones.arm_r1) bones.arm_r1.rotation.x = Math.min(bones.arm_r1.rotation.x, -0.42);
+    if (bones.arm_r2) bones.arm_r2.rotation.y = Math.max(bones.arm_r2.rotation.y, 0.72);
+  }
 
   // Door IK overlay: live handle grip or shoulder-ram forearm brace
   if (door?.kind === 'slam') {

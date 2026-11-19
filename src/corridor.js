@@ -9,6 +9,7 @@ import {
 } from './layout.js';
 import { makeTextures, roomPlate } from './textures.js';
 import { buildRooms } from './rooms.js';
+import { createDestruction } from './destruction.js';
 import { buildDebris } from './debris.js';
 
 const { halfWidth: W, height: H, near, far } = hall;
@@ -84,7 +85,7 @@ function rod(p, m, start, end, radius, tint) {
 }
 
 // Assemble in local architectural coordinates, then batch the stationary meshes.
-function bake(root) {
+function bake(root, destruction = null) {
   root.updateMatrixWorld(true);
   const batches = new Map();
   root.traverse(obj => {
@@ -97,14 +98,29 @@ function bake(root) {
   for (const [mat, geometries] of batches) {
     const merged = mergeGeometries(geometries);
     merged.computeBoundingSphere();
-    scene.add(new Mesh(merged, mat));
+    const mesh = new Mesh(merged, mat);
+    scene.add(mesh);
+    if (destruction) {
+      let start = 0;
+      const ranges = [];
+      for (const geometry of geometries) {
+        geometry.computeBoundingBox();
+        const bounds = geometry.boundingBox;
+        const end = start + geometry.attributes.position.count;
+        if (bounds.max.y > .035 && bounds.min.y < 3.95 && !geometry.userData.support) {
+          ranges.push({ start, end, bounds });
+        }
+        start = end;
+      }
+      if (ranges.length) destruction.register(mesh, ranges);
+    }
     for (const g of geometries) g.dispose();
   }
   return scene;
 }
 
-export function buildCorridor(makeMaterial) {
-  const art = makeTextures();
+export function buildCorridor(makeMaterial, prebuiltArt = null) {
+  const art = prebuiltArt || makeTextures();
   const solid = makeMaterial(art.white);
   const wood = makeMaterial(art.wood, { repeat: [1.09, 2.17] });
   const paint = makeMaterial(art.paint, { repeat: [2.24, 1.12] });
@@ -129,6 +145,7 @@ export function buildCorridor(makeMaterial) {
   const doors = [];
   const switches = [];
   const furniture = [];
+  const specials = {};
 
   function cutoutFrame(parent, mat, cx, yB, yT, width, depth, tint, gx, gy, holeW, holeH) {
     const left = cx - width / 2, right = cx + width / 2;
@@ -848,15 +865,17 @@ export function buildCorridor(makeMaterial) {
     materials: { solid, wood, paint, plaster, floorMat, ceilingMat, luminous, doorWood, doorPaint, doorTrim, doorGlass },
     makeMaterial,
     art,
-    movableFurniture: furniture
+    movableFurniture: furniture,
+    specials
   });
 
-  const scene = bake(root);
+  const destruction = createDestruction(obstacles, doors, solid);
+  const scene = bake(root, destruction);
   for (const child of [...bake(lampTubes).children]) scene.add(child);
   scene.add(dynamicRoot);
   dynamicRoot.updateMatrixWorld(true);
   const debris = buildDebris(makeMaterial, art, obstacles);
   scene.add(debris.root);
-  return { scene, obstacles, doors, switches, debris, furniture };
+  return { scene, obstacles, doors, switches, debris, furniture, destruction, specials };
 }
 

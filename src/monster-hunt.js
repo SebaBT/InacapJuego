@@ -1,13 +1,16 @@
-import { landing, monsterSpawn, plaza, rooms, stairs, worldBounds } from './layout.js';
+import { monsterSpawn, worldBounds } from './layout.js';
+import { createDestruction } from './destruction.js';
 import { shortestAngleDiff } from './third-person.js';
 import { createMonsterNavigation } from './monster-navigation.js';
 import {
   findBlockingProp, planThrow, throwDuration, throwPose, throwRelease
 } from './monster-throw.js';
 
-const sightRange = 17, viewCos = Math.cos(58 * Math.PI / 180);
+const defaultSightRange = 17, viewCos = Math.cos(58 * Math.PI / 180);
 const closeViewCos = Math.cos(88 * Math.PI / 180);
-const catchRange = 1.38, chaseSpeed = 3.85;
+const catchRange = 1.38, baseChaseSpeed = 3.85;
+const basePatrolSpeed = 1.06, baseInvestigateSpeed = 1.74;
+const defaultLostTimeout = 1.35;
 // The suit never shares a footprint with the body it is hunting. Its arms are
 // longer than that anyway, so the last half metre is walked with the gloves,
 // not with the hem.
@@ -31,50 +34,90 @@ export function capturePose(t) {
   };
 }
 
-const roomCenter = id => {
-  const r = rooms.find(room => room.id === id);
-  return { x: (r.x0 + r.x1) / 2, z: r.doorZ };
-};
-const patrol = [
-  { x: .8, z: 9.8 },
-  roomCenter('101'),
-  roomCenter('102'),
-  { x: -.8, z: 18.8 },
-  roomCenter('103'),
-  { x: (plaza.southWalkway.x0 + plaza.southWalkway.x1) / 2, z: plaza.main.z1 - 2.4 },
-  roomCenter('107'),
-  { x: plaza.fountain.x - 5.2, z: plaza.fountain.z },
-  { x: (plaza.bikeRack.x1 + plaza.northPassage.x1) / 2, z: (plaza.bikeRack.z0 + plaza.bikeRack.z1) / 2 },
-  { x: (plaza.annexAlley.x0 + plaza.annexAlley.x1) / 2, z: (plaza.annexAlley.z0 + plaza.annexAlley.z1) / 2 },
-  { x: (stairs.x0 + stairs.x1) / 2, z: landing.z1 - .9 },
-  roomCenter('106'),
-  roomCenter('105'),
-  roomCenter('104'),
-  { x: plaza.fountain.x + 6.0, z: plaza.fountain.z }
-];
-
 export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, closeDoor = () => {},
-  spawn = monsterSpawn, patrolPoints = patrol, furniture = null }) {
+  spawn = monsterSpawn, patrolPoints = null, furniture = null, destruction = null }) {
   const nav = createMonsterNavigation(obstacles, doors);
+  const terrain = destruction ?? createDestruction(obstacles, doors);
   const state = {};
+  // The live round always tracks its player. An explicitly authored patrol
+  // can still be used for a scripted sequence.
+  const tracksPlayer = patrolPoints === null;
+  let pursuitSpeed = 0;
   let route, plannedGoal, crossing, patrolIndex, replanIn, lostTime, searchTime, searchYaw, cryCooldown, searchGoal;
   let crossingGrace, growlCooldown, slamDoor;
   let throwCheck, throwCooldown, throwProp, clearing, throwOrigin, pickupSpot;
+  let stunTime = 0, activeThreat = resolveThreat(null);
   let activePlayer = null;
+  function resolveThreat(threat = null) {
+    return {
+      chaseSpeed: threat?.chaseSpeed ?? baseChaseSpeed,
+      patrolSpeed: threat?.patrolSpeed ?? basePatrolSpeed,
+      investigateSpeed: threat?.investigateSpeed ?? baseInvestigateSpeed,
+      sightRange: threat?.sightRange ?? defaultSightRange,
+      hearingMult: threat?.hearingMult ?? 1,
+      lostTimeout: threat?.lostTimeout ?? defaultLostTimeout,
+      crossingSpeedMult: threat?.crossingSpeedMult ?? 1,
+      throwCooldownMult: threat?.throwCooldownMult ?? 1,
+      frenzy: Boolean(threat?.frenzy),
+      decoy: threat?.decoy ?? null
+    };
+  }
   function reset() {
-    Object.assign(state, { ...spawn, y: nav.floorAt(spawn), mode: 'patrol', visible: false, lastKnown: null,
+    terrain.reset();
+    pursuitSpeed = 0;
+    nav.invalidate();
+    Object.assign(state, { ...spawn, y: nav.floorAt(spawn), mode: tracksPlayer ? 'chase' : 'patrol', visible: false, lastKnown: null,
       speed: 0, stridePhase: 0, fold: 0, doorPress: 0, captureTime: 0, captureSide: 0, captureYaw: spawn.yaw,
       maneuvering: false, stomp: 0, scream: null, growl: null, animation: 'idle',
       throwing: false, throwTime: 0, throwTotal: throwDuration, throwYaw: spawn.yaw, throwSide: 1,
       throwFacingYaw: spawn.yaw, throwPropId: null, throwPlan: null,
-      throwPose: null, carry: null, impact: 0, impactDone: false, released: false });
+      throwPose: null, carry: null, impact: 0, impactDone: false, released: false,
+      stunned: 0, frenzy: false, smashedWall: null, smashedProp: null, smashedDecoy: null });
     route = []; plannedGoal = crossing = null;
     patrolIndex = 0; replanIn = lostTime = searchTime = cryCooldown = crossingGrace = growlCooldown = 0;
     searchGoal = null; slamDoor = null;
     throwCheck = throwCooldown = 0; throwProp = null; clearing = 0; throwOrigin = pickupSpot = null;
+    stunTime = 0; activeThreat = resolveThreat(null);
     activePlayer = null;
     holdDoor(null);
     furniture?.reset();
+  }
+  function releaseThrow() {
+    if (!state.throwing || !throwProp || !furniture) return;
+    if (furniture.held === throwProp) {
+      furniture.launch(throwProp, {
+        from: state.carry ?? { x: throwProp.x, y: throwProp.y, z: throwProp.z },
+        to: { x: throwProp.x, z: throwProp.z },
+        arc: .22,
+        duration: .22,
+        yaw: state.yaw
+      });
+    }
+    state.throwing = false;
+    state.throwPose = null;
+    state.carry = null;
+    state.throwPropId = null;
+    state.throwPlan = null;
+    throwProp = null;
+    pickupSpot = null;
+  }
+  function stun(duration = 3.2) {
+    if (state.mode === 'capture' || state.mode === 'dead') return false;
+    const prev = stunTime;
+    stunTime = Math.max(stunTime, Math.max(0.25, duration));
+    state.stunned = stunTime;
+    releaseThrow();
+    if (crossing) {
+      crossing = null;
+      state.fold = 0;
+      state.doorPress = 0;
+      holdDoor(null);
+    }
+    slamDoor = null;
+    route = [];
+    plannedGoal = null;
+    if (prev <= 0) state.scream = 'stun';
+    return true;
   }
   reset();
   // A player waiting in a threshold is reachable from either side of the
@@ -113,28 +156,53 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     // player inside a narrow cone: a body pressed into the corner beside it is
     // still seen.
     const effViewCos = (d < 3.2 || state.mode === 'chase' || state.mode === 'investigate' ||
-      state.mode === 'search') ? closeViewCos : viewCos;
+      state.mode === 'search' || activeThreat.frenzy) ? closeViewCos : viewCos;
+    const wasVisible = state.visible;
     const lineOfSight = nav.visible(eye, target);
-    state.visible = d <= sightRange && forward >= d * effViewCos && lineOfSight;
-    if (!state.visible && d < 1.85 && lineOfSight) state.visible = true;
-    const heard = p.noiseRadius > 0 && nav.acousticDistance(state, p) <= p.noiseRadius;
+    state.visible = d <= activeThreat.sightRange && forward >= d * effViewCos && lineOfSight;
+    if (!state.visible && d < (activeThreat.frenzy ? 2.6 : 1.85) && lineOfSight) state.visible = true;
+    const heard = !tracksPlayer && p.noiseRadius > 0 &&
+      nav.acousticDistance(state, p) <= p.noiseRadius * activeThreat.hearingMult;
+    const decoy = activeThreat.frenzy ? null : activeThreat.decoy;
+    let decoyHeard = false;
+    if (decoy) {
+      const decoyDist = distance(state, decoy);
+      if (decoyDist < 1.15 && !state.maneuvering) {
+        state.smashedDecoy = decoy.id;
+        state.impact = 1;
+        if (state.lastKnown?.decoyId === decoy.id) state.lastKnown = null;
+      } else if (!state.visible && decoy.radius > 0) {
+        const dAcoustic = nav.acousticDistance(state, decoy);
+        const reach = Number.isFinite(dAcoustic) ? dAcoustic : decoyDist;
+        decoyHeard = reach <= decoy.radius * activeThreat.hearingMult;
+      }
+    }
     if (state.visible) {
-      if (state.mode !== 'chase' && cryCooldown <= 0) {
+      if ((state.mode !== 'chase' || (tracksPlayer && !wasVisible)) && cryCooldown <= 0) {
         state.scream = 'alert';
-        cryCooldown = 4.5;
+        cryCooldown = activeThreat.frenzy ? 3.0 : 4.5;
       }
       state.mode = 'chase';
       lostTime = 0;
+    } else if (decoyHeard) {
+      state.mode = 'investigate';
+      state.lastKnown = { x: decoy.x, z: decoy.z, decoyId: decoy.id };
+      searchGoal = null;
+    } else if (tracksPlayer || activeThreat.frenzy) {
+      state.mode = 'chase';
+      state.lastKnown = point(p);
+      searchGoal = null;
+      lostTime = 0;
     } else if (state.mode === 'chase') {
       lostTime += dt;
-      if (lostTime > 1.35) state.mode = 'investigate';
+      if (lostTime > activeThreat.lostTimeout) state.mode = 'investigate';
     } else if (heard) {
       state.mode = 'investigate';
     }
-    if (state.visible || heard) {
+    if (state.visible || (heard && !decoyHeard)) {
       state.lastKnown = point(p);
       searchGoal = null;
-    } else if ((state.mode === 'chase' || state.mode === 'investigate') &&
+    } else if (!tracksPlayer && !decoyHeard && (state.mode === 'chase' || state.mode === 'investigate') &&
       d < 4.5 && nav.blockingOpenDoor?.(state, p)) {
       // The open leaf hides the body from the corridor, but the suit knows the
       // player ducked into the pocket behind it. Keep the trail alive so the
@@ -226,8 +294,56 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       growlCooldown = state.mode === 'chase' ? 1.4 : 2.3;
     }
   }
+  function pursue(target, dt) {
+    const dx = target.x - state.x, dz = target.z - state.z;
+    const dist = Math.hypot(dx, dz);
+    if (!dist) return;
+    const ux = dx / dist, uz = dz / dist;
+    state.yaw = turn(state.yaw, Math.atan2(dx, dz), dt * 8);
+    const ahead = length => ({ x: state.x + ux * length, z: state.z + uz * length });
+    const radius = .53;
+    const walkSpeed = Math.min(2.05, activeThreat.patrolSpeed + .30);
+    // Sight of a wall lengthens the stride. Only contact by this frame's
+    // moving body breaks it; the look-ahead itself never changes the world.
+    const probe = Math.min(dist, Math.max(2.3, activeThreat.chaseSpeed * dt));
+    const { t, obstacle } = nav.firstHit(state, ahead(probe), radius, state.y);
+    const contact = obstacle ? probe * t : Infinity;
+    const rush = activeThreat.frenzy ? 1 : 1 - ramp(0, 2.3, contact);
+    const desired = walkSpeed + (activeThreat.chaseSpeed - walkSpeed) * rush;
+    if (!pursuitSpeed) pursuitSpeed = walkSpeed;
+    pursuitSpeed += (desired - pursuitSpeed) * (1 - Math.exp(-dt * (desired > pursuitSpeed ? 8 : 2.6)));
+    let step = Math.min(dist, pursuitSpeed * dt);
+    if (obstacle && contact <= step) {
+      const center = ahead(contact);
+      let x = clamp(center.x, obstacle.x0, obstacle.x1), z = clamp(center.z, obstacle.z0, obstacle.z1);
+      if (obstacle.kind === 'segment') {
+        const vx = obstacle.bx - obstacle.ax, vz = obstacle.bz - obstacle.az;
+        const along = clamp(((center.x - obstacle.ax) * vx + (center.z - obstacle.az) * vz) /
+          (vx * vx + vz * vz || 1), 0, 1);
+        x = obstacle.ax + along * vx; z = obstacle.az + along * vz;
+      }
+      const prop = obstacle.movable && furniture?.byId(obstacle.propId);
+      if (prop) {
+        furniture.launch(prop, { to: { x: prop.x + uz * 2.8, z: prop.z - ux * 2.8 },
+          arc: .95, duration: .48, yaw: state.yaw });
+        state.smashedProp = { x, z };
+      } else if (terrain.breach(x, z, state.y, obstacle)) {
+        if (obstacle.movable) state.smashedProp = { x, z };
+        else state.smashedWall = { x, z, y: state.y, dx: ux, dz: uz };
+      }
+      if (state.smashedProp || state.smashedWall) {
+        nav.invalidate();
+        state.impact = 1;
+      }
+      // A second collider, or the locked exit gate, may still occupy the
+      // remainder. Spend the same stride up to that surface.
+      step *= nav.firstHit(state, ahead(step), radius, state.y).t;
+    }
+    moveToward(ahead(step), pursuitSpeed, dt);
+  }
   function passDoor(next, goal, dt) {
     const { portal } = next;
+    const cMult = activeThreat.crossingSpeedMult;
     if (!crossing) {
       if (portal.door.locked) { route = []; plannedGoal = null; return false; }
       const heading = Math.atan2(next.x - state.x, next.z - state.z);
@@ -236,22 +352,22 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       lostTime = 0;
     }
     if (crossing.phase === 'fold') {
-      state.fold = Math.min(1, state.fold + dt / .44);
-      state.yaw = turn(state.yaw, portal.sideYaw, dt * 5.6);
+      state.fold = Math.min(1, state.fold + dt * cMult / .44);
+      state.yaw = turn(state.yaw, portal.sideYaw, dt * 5.6 * cMult);
       if (state.fold === 1 && Math.abs(shortestAngleDiff(state.yaw, portal.sideYaw)) < .01) crossing.phase = 'approach';
     } else if (crossing.phase === 'approach') {
-      const braced = moveToward(crossing.brace, 1.28, dt);
+      const braced = moveToward(crossing.brace, 1.28 * cMult, dt);
       state.doorPress = crossing.side * (1 - portal.door.open) * (1 - ramp(0, .72, distance(state, crossing.brace)));
       if (braced) { holdDoor(portal.door, state); crossing.phase = 'cross'; }
     } else if (crossing.phase === 'cross') {
       state.doorPress = crossing.side * (1 - portal.door.open);
-      if (portal.door.open >= .985 && moveToward(next, 1.48, dt)) crossing.phase = 'unfold';
+      if (portal.door.open >= .985 && moveToward(next, 1.48 * cMult, dt)) crossing.phase = 'unfold';
       if (state.mode !== 'patrol' && distance(portal.center, goal) < 1.65 && distance(state, goal) < .72) {
         crossing.visited = point(goal);
       }
     } else {
-      state.fold = Math.max(0, state.fold - dt / .44);
-      state.yaw = turn(state.yaw, crossing.heading, dt * 4.8);
+      state.fold = Math.max(0, state.fold - dt * cMult / .44);
+      state.yaw = turn(state.yaw, crossing.heading, dt * 4.8 * cMult);
       if (state.fold === 0) {
         const reached = crossing.visited && distance(goal, crossing.visited) < .72;
         crossing = plannedGoal = null; route = [];
@@ -269,7 +385,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     if (!crossing && (!plannedGoal || (replanIn <= 0 && distance(goal, plannedGoal) > .48))) {
       route = nav.route(state, goal);
       plannedGoal = point(goal);
-      replanIn = .24;
+      replanIn = activeThreat.frenzy ? .16 : .24;
     }
     const next = route[0];
     if (!next) return true;
@@ -280,15 +396,27 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     const chasing = state.mode === 'chase';
     state.yaw = turn(state.yaw, angle, dt * (chasing ? 6.8 : 3.9));
     const facing = Math.max(.1, Math.cos(shortestAngleDiff(state.yaw, angle)));
-    const speed = chasing ? chaseSpeed : state.mode === 'patrol' ? 1.06 : 1.74;
+    const speed = chasing ? activeThreat.chaseSpeed
+      : state.mode === 'patrol' ? activeThreat.patrolSpeed : activeThreat.investigateSpeed;
     if (moveToward(next, speed * facing, dt)) route.shift();
     return route.length === 0;
   }
   function beginSearch() {
+    if (activeThreat.frenzy) {
+      state.mode = 'chase';
+      plannedGoal = null;
+      return;
+    }
     state.mode = 'search'; plannedGoal = null;
     searchTime = 0; searchYaw = state.yaw;
   }
   function search(dt) {
+    if (activeThreat.frenzy) {
+      state.mode = 'chase';
+      searchGoal = null;
+      plannedGoal = null;
+      return;
+    }
     searchTime += dt;
     state.yaw = searchYaw + 1.13 * Math.sin(searchTime * 1.7);
     if (searchTime < 3.1) return;
@@ -380,7 +508,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       state.yaw = turn(state.yaw, towardProp, dt * 6);
       // Close the distance at full sprint speed: the monster must not slow-walk
       // up to the desk it is about to snatch.
-      const arrived = moveToward(pickupSpot, chaseSpeed, dt);
+      const arrived = moveToward(pickupSpot, activeThreat.chaseSpeed, dt);
       const oldBeat = Math.floor(state.stridePhase / Math.PI);
       state.stridePhase += state.speed * dt * Math.PI / .72;
       const beat = Math.floor(state.stridePhase / Math.PI);
@@ -440,14 +568,19 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       // Resume the chase immediately: a short cooldown, no long clearing hold.
       state.yaw = facing;
       throwProp = null;
-      plannedGoal = null; replanIn = 0; throwCooldown = .35; clearing = .18;
+      plannedGoal = null; replanIn = 0;
+      throwCooldown = .35 * activeThreat.throwCooldownMult;
+      clearing = .18;
     }
     state.animation = 'idle';
     return state;
   }
-  function update(dt, p) {
+  function update(dt, p, threat = null) {
     activePlayer = p || null;
+    activeThreat = resolveThreat(threat);
     state.stomp = 0; state.scream = null; state.growl = null; state.impact = 0;
+    state.smashedWall = null; state.smashedProp = null; state.smashedDecoy = null;
+    state.frenzy = activeThreat.frenzy;
     state.maneuvering = Boolean(crossing) || state.fold > .001 ||
       Boolean(slamDoor && (slamDoor.open ?? 0) > .55);
     if (!p.active || p.noclip || dt <= 0 || state.mode === 'dead') return state;
@@ -462,7 +595,20 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       if (state.captureTime === captureDuration) state.mode = 'dead';
       return state;
     }
-    if (state.throwing) return updateThrow(dt);
+    if (stunTime > 0) {
+      stunTime = Math.max(0, stunTime - dt);
+      state.stunned = stunTime;
+      state.speed = 0;
+      state.animation = 'idle';
+      state.maneuvering = false;
+      state.doorPress = 0;
+      return state;
+    }
+    state.stunned = 0;
+    if (state.throwing) {
+      if (!tracksPlayer && !activeThreat.frenzy) return updateThrow(dt);
+      releaseThrow();
+    }
     state.speed = 0;
     cryCooldown -= dt; replanIn -= dt;
     throwCooldown -= dt; throwCheck -= dt;
@@ -474,8 +620,17 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     // instead of leaving the suit planted and staring at the player. A player
     // crouched behind it at close range still counts: the investigation is the
     // chase in all but name once the two are inside a room's length.
+    const charging = tracksPlayer || activeThreat.frenzy;
+    if (charging) {
+      if (crossing || slamDoor) holdDoor(null);
+      crossing = slamDoor = plannedGoal = null;
+      route = [];
+      state.fold = 0;
+      state.maneuvering = false;
+      state.doorPress = 0;
+    }
     const closeInvestigation = state.mode === 'investigate' && distance(state, p) < 4.5;
-    if (furniture && state.visible && !crossing && throwCooldown <= 0 && throwCheck <= 0 &&
+    if (!charging && furniture && state.visible && !crossing && throwCooldown <= 0 && throwCheck <= 0 &&
         (state.mode === 'chase' || closeInvestigation)) {
       throwCheck = .32;
       const prop = findBlockingProp({ origin: state, player: p, nav, props: furniture.props });
@@ -486,7 +641,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       if (plan && beginThrow(prop, plan)) return state;
       // A found prop that could not be reached yet is retried after a short
       // step; with nothing on the line the check can wait a full beat.
-      throwCooldown = prop ? .55 : 1.6;
+      throwCooldown = (prop ? .55 : 1.6) * activeThreat.throwCooldownMult;
     }
     if (slamDoor && (slamDoor.open ?? 0) <= .25) {
       slamDoor = null;
@@ -495,7 +650,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     // The player is tucked behind an open leaf. Walk around to the door, slam
     // it shut and step into the corner it was shielding.
     let closingDoor = false;
-    if (!crossing && (state.mode === 'chase' || state.mode === 'investigate')) {
+    if (!charging && !crossing && (state.mode === 'chase' || state.mode === 'investigate')) {
       const behind = nav.blockingOpenDoor?.(state, p);
       // Slamming only makes sense once the suit stands on the player's side of
       // the doorway. From the corridor (or from the room while the player is
@@ -526,7 +681,9 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
         }
       }
     }
-    if (!closingDoor) {
+    if (charging) {
+      pursue(state.lastKnown?.decoyId ? state.lastKnown : p, dt);
+    } else if (!closingDoor) {
       if (state.mode === 'search') {
         search(dt);
       } else {
@@ -549,7 +706,17 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
                   { x: p.x, y: p.cameraY - .15, z: p.z })) {
               state.yaw = turn(state.yaw, Math.atan2(p.x - state.x, p.z - state.z), dt * 6.8);
               const step = nav.clampToSolids ? nav.clampToSolids(state, p, .42) : p;
-              moveToward(step, chaseSpeed * .85, dt);
+              moveToward(step, activeThreat.chaseSpeed * .85, dt);
+            }
+          } else if (state.lastKnown?.decoyId && state.mode === 'investigate') {
+            state.smashedDecoy = state.lastKnown.decoyId;
+            state.impact = 1;
+            state.lastKnown = null;
+            if (activeThreat.frenzy) {
+              state.mode = 'chase';
+              state.lastKnown = point(p);
+            } else {
+              beginSearch();
             }
           } else if (!state.visible && crossingGrace <= 0) beginSearch();
           else if (clearing > 0) state.yaw = turn(state.yaw, Math.atan2(p.x - state.x, p.z - state.z), dt * 4);
@@ -578,5 +745,5 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     plannedGoal = null;
     replanIn = 0;
   }
-  return { state, update, reset, navigation: nav, invalidateNavigation };
+  return { state, update, reset, stun, navigation: nav, invalidateNavigation };
 }

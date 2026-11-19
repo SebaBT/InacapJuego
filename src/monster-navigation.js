@@ -1,5 +1,5 @@
 import { annex, hall, plaza, rooms, worldBounds } from './layout.js';
-import { castCameraRay, raycastAabb } from './third-person.js';
+import { castCameraRay, raycastAabb, raycastCapsule2D } from './third-person.js';
 
 // Regular paths give the hood clearance on both sides. Doors are separate
 // edges: only the animated, folded suit can use them.
@@ -291,12 +291,14 @@ export function createMonsterNavigation(obstacles, doors) {
     entry[key] = resolved;
     return resolved;
   }
-  function firstHit(a, b, radius = .02) {
+  function firstHit(a, b, radius = .02, footY = 0) {
     const dx = b.x - a.x, dz = b.z - a.z;
     let best = 1, obstacle = null;
     for (const o of obstacles) {
-      if (o.active === false || o.step || o.bottom !== undefined) continue;
-      const hit = raycastAabb(a.x, 1.1, a.z, dx, 0, dz,
+      if (o.active === false || o.step || (o.bottom ?? 0) > footY + 2.05 || (o.top ?? Infinity) <= footY + .04) continue;
+      const hit = o.kind === 'segment'
+        ? raycastCapsule2D(a.x, a.z, dx, dz, o.ax, o.az, o.bx, o.bz, radius + (o.halfThick ?? .035))
+        : raycastAabb(a.x, 1.1, a.z, dx, 0, dz,
         o.x0 - radius, -10, o.z0 - radius, o.x1 + radius, 20, o.z1 + radius);
       if (hit < best) { best = hit; obstacle = o; }
     }
@@ -473,7 +475,7 @@ export function createMonsterNavigation(obstacles, doors) {
   function blockingOpenDoor(monster, player) {
     if (!monster || !player) return null;
     for (const door of doors || []) {
-      if (door.locked || (door.open ?? 0) <= .25) continue;
+      if (door.breached || door.locked || (door.open ?? 0) <= .25) continue;
       if (!door.pos) continue;
       for (const pivot of door.pivots || []) {
         if (typeof pivot.hx !== 'number' || typeof pivot.hz !== 'number') continue;
@@ -531,7 +533,7 @@ export function createMonsterNavigation(obstacles, doors) {
   }
   return {
     route, acousticDistance, invalidate, firstHit, blockingOpenDoor, clampToSolids,
-    areaAt,
+    areaAt, portals,
     sameArea(a, b) { return Boolean(areaAt(a) && areaAt(a) === areaAt(b)); },
     floorAt(p) { return steps.reduce((y, b) => inside(p, b) ? Math.max(y, b.top) : y, 0); },
     visible(a, b) {

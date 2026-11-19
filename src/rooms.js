@@ -1,4 +1,4 @@
-import { Box3, BoxGeometry, CylinderGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, PlaneGeometry, Vector3 } from 'three';
+import { Box3, BoxGeometry, CylinderGeometry, Float32BufferAttribute, Group, Matrix4, Mesh, PlaneGeometry, TorusGeometry, Vector3 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { annex, furnishingBays, hall, landing, plaza, plazaLights, rooms, stairs, switchOffset, wallThickness } from './layout.js';
 import { roomPlate } from './textures.js';
@@ -88,7 +88,8 @@ export function buildRooms({
   materials,
   makeMaterial,
   art,
-  movableFurniture = []
+  movableFurniture = [],
+  specials = {}
 }) {
   const { solid, wood, paint, plaster, floorMat, ceilingMat, luminous } = materials;
   const doorWood = materials.doorWood || makeMaterial(art.wood, { repeat: [1.09, 2.17], shininess: .46 });
@@ -792,6 +793,10 @@ export function buildRooms({
             box(root, solid, swX - .094, 1.72, sz - .14, .008, .14, .14, 0xcac6ae);
             box(root, solid, swX - .090, 1.46, sz + .18, .04, .14, .05, 0x222926);
           }
+          if (i === 1) {
+            box(root, solid, swX - .14, 1.13, sz, .32, .04, .46, 0x68736c);
+            box(root, solid, swX - .28, 1.16, sz, .025, .06, .46, 0xbc8e37);
+          }
           // Glowing amber/red/green generator status LEDs
           for (const [li, lcol] of [0xffa438, 0xe84836, 0x67c47a].entries()) {
             box(root, luminous, swX - .078, 1.90 - li * .12, sz + .24, .014, .032, .032, lcol);
@@ -1089,7 +1094,7 @@ export function buildRooms({
     const topY = (i + 1) * stepRise;
     const z1 = stairStartZ - i * stepDepth;
     const z0 = z1 - stepDepth;
-    box(root, floorMat, stairCX, topY / 2, (z0 + z1) / 2, stairWidth, topY, stepDepth, 0xd9d8cb);
+    box(root, floorMat, stairCX, topY / 2, (z0 + z1) / 2, stairWidth, topY, stepDepth, 0xd9d8cb).geometry.userData.support = true;
     // Non-slip metal stair nosing
     box(root, solid, stairCX, topY + .006, z1 - .025, stairWidth - .02, .014, .05, 0x39433d);
     obstacles.push({ x0: stairX0, x1: stairX1, z0, z1, top: topY, step: true });
@@ -1107,7 +1112,7 @@ export function buildRooms({
     landingY,
     landingZ1 - landingZ0,
     0xcac9bc
-  );
+  ).geometry.userData.support = true;
   obstacles.push({
     x0: landingX0,
     x1: landingX1,
@@ -1168,6 +1173,7 @@ export function buildRooms({
   // =====================================================================
   // MINI PLAZA EXTERIOR ("Patio Central")
   // =====================================================================
+  box(root, plazaFloorMat, -5, -.18, -8, 56, .12, 72, 0x62695f);
   const plazaSlabs = [
     plaza.main,
     { x0: -25.60, x1: -18.40, z0: 11.60, z1: 12.40 },
@@ -1184,8 +1190,8 @@ export function buildRooms({
   box(root, paint, -3.75, 1.075 / 2, -27.60, .31, 1.075, .81, WHITE);
   obstacles.push({ x0: -3.90, x1: -3.60, z0: -28.00, z1: -27.20 });
 
-  // 6-sided skybox enclosure spanning x: -58..+42, y: -2..+42, z: -68..+52
-  const skyboxMesh = box(root, skyboxMat, -8, 20, -8, 100, 44, 120);
+  // 6-sided skybox enclosure spanning x: -64..+48, y: -2..+46, z: -68..+72
+  const skyboxMesh = box(root, skyboxMat, -8, 21, 2, 112, 46, 140);
   skyboxMesh.name = 'skybox';
 
   // Exterior roof parapets, upper facades (y = 3.08..3.96), pilasters & downspouts
@@ -1328,25 +1334,111 @@ export function buildRooms({
   const gHalf = gate.width / 2;
   perimeterFence(-18.40, 19.71, gate.x - gHalf, 19.71);
   perimeterFence(gate.x + gHalf, 19.71, -13.60, 19.71);
-  const gateGroup = group(dynamicRoot, gate.x, 19.66, 0);
+  obstacles.push(
+    { x0: -18.40, x1: gate.x - gHalf, z0: 19.60, z1: 19.82 },
+    { x0: gate.x + gHalf, x1: -13.60, z0: 19.60, z1: 19.82 }
+  );
+
+  const gatePivots = [];
+  const gateHandles = [];
+  const gateContainer = group(dynamicRoot, gate.x, 19.66, 0);
   for (const s of [-1, 1]) {
-    box(gateGroup, solid, s * (gHalf / 2), 1.55, 0, gHalf - .06, .06, .06, 0x222927);
-    box(gateGroup, solid, s * (gHalf / 2), .18, 0, gHalf - .06, .07, .06, 0x222927);
-    box(gateGroup, solid, s * (gHalf / 2), 2.88, 0, gHalf - .06, .06, .06, 0x222927);
+    const hingeLocalX = s * gHalf;
+    const leafPivot = group(gateContainer, hingeLocalX, 0, 0);
+    const lx = -s * (gHalf / 2);
+    box(leafPivot, solid, lx, 1.55, 0, gHalf - .06, .06, .06, 0x222927);
+    box(leafPivot, solid, lx, .18, 0, gHalf - .06, .07, .06, 0x222927);
+    box(leafPivot, solid, lx, 2.88, 0, gHalf - .06, .06, .06, 0x222927);
     for (let i = 0; i < 6; i++) {
-      const bx = s * (.12 + i * ((gHalf - .24) / 5));
-      box(gateGroup, solid, bx, 1.56, 0, .034, 2.90, .034, 0x28312e);
-      box(gateGroup, solid, bx, 3.07, 0, .048, .12, .034, 0x3a433f);
+      const bx = -s * (.12 + i * ((gHalf - .24) / 5));
+      box(leafPivot, solid, bx, 1.56, 0, .034, 2.90, .034, 0x28312e);
+      box(leafPivot, solid, bx, 3.07, 0, .048, .12, .034, 0x3a433f);
     }
+    const hingeWorldX = gate.x + hingeLocalX;
+    const hingeWorldZ = 19.66;
+    const leafEndX = hingeWorldX - s * gHalf;
+    const leafObstacle = {
+      kind: 'segment',
+      ax: hingeWorldX,
+      az: hingeWorldZ,
+      bx: leafEndX,
+      bz: hingeWorldZ,
+      halfThick: .04,
+      x0: Math.min(hingeWorldX, leafEndX) - .04,
+      x1: Math.max(hingeWorldX, leafEndX) + .04,
+      z0: hingeWorldZ - .04,
+      z1: hingeWorldZ + .04,
+      active: true
+    };
+    obstacles.push(leafObstacle);
+    gatePivots.push({
+      group: leafPivot,
+      hand: -s,
+      maxAngle: 1.58,
+      hx: hingeWorldX,
+      hz: hingeWorldZ,
+      length: gHalf,
+      closedDirX: -s,
+      closedDirZ: 0,
+      swingDirX: 0,
+      swingDirZ: 1,
+      obstacle: leafObstacle
+    });
+    gateHandles.push(group3(leafPivot, -s * 0.16, 1.15, -.08));
   }
-  box(gateGroup, solid, 0, 1.24, -.04, .34, .06, .06, 0x4b4a42);
-  box(gateGroup, solid, 0, 1.13, -.06, .12, .15, .06, 0x8f4034);
-  const gateHandle = group3(gateGroup, 0, 1.15, -.08);
-  obstacles.push({ x0: -18.40, x1: -13.60, z0: 19.60, z1: 19.82 });
-  doors.push({
+
+  // Diegetic lock visuals on Portón Exterior:
+  // 1) Chain & padlock on center meeting bars (boltCutters)
+  const lockChainGroup = group(dynamicRoot, gate.x, 19.60, 0);
+  for (let i = -4; i <= 4; i++) {
+    const link = piece(lockChainGroup, doorTrim, new TorusGeometry(.038, .009, 6, 14),
+      i * .059, 1.20 + .003 * i * i, -.083, i % 2 ? 0x929c98 : 0xbac0b6);
+    link.scale.x = 1.35;
+    link.rotation.x = i % 2 ? .95 : -.20;
+    link.rotation.z = i * .04;
+  }
+  piece(lockChainGroup, doorTrim, new TorusGeometry(.034, .009, 6, 14),
+    0, 1.17, -.105, 0xdac39c).scale.y = 1.3;
+  box(lockChainGroup, solid, 0, 1.09, -.105, .105, .11, .05, 0xc28c43);
+  box(lockChainGroup, solid, 0, 1.10, -.132, .014, .032, .004, 0x302c29);
+
+  // 2) Electrical fuse box on East gate post (fuse)
+  const lockFuseBox = group(dynamicRoot, gate.x + gHalf + 0.18, 19.50, 0);
+  box(lockFuseBox, solid, 0, 1.38, 0, .24, .34, .12, 0x3b4540);
+  const fuseLedRed = box(lockFuseBox, luminous, 0, 1.49, -.07, .07, .04, .02, 0xe84836);
+  const fuseLedGreen = box(lockFuseBox, luminous, 0, 1.49, -.07, .07, .04, .02, 0x55e08a);
+  fuseLedGreen.visible = false;
+  const fusePlug = box(lockFuseBox, luminous, 0, 1.33, -.07, .09, .05, .04, 0xffaa38);
+  fusePlug.visible = false;
+
+  // 3) Security key reader on West gate post (masterKey)
+  const lockKeyBox = group(dynamicRoot, gate.x - gHalf - 0.18, 19.50, 0);
+  box(lockKeyBox, solid, 0, 1.32, 0, .20, .28, .10, 0x343f3b);
+  const keyLedRed = box(lockKeyBox, luminous, 0, 1.41, -.06, .06, .04, .02, 0xe84836);
+  const keyLedGreen = box(lockKeyBox, luminous, 0, 1.41, -.06, .06, .04, .02, 0x55e08a);
+  keyLedGreen.visible = false;
+  const keyBlade = box(lockKeyBox, solid, 0, 1.26, -.08, .04, .04, .09, 0xe8cf6a);
+  keyBlade.visible = false;
+
+  const latch = group3(dynamicRoot, gate.x, 1.28, 19.52);
+  latch.name = 'Cerrojo del portón';
+  box(latch, solid, 0, 0, -.02, .48, .055, .055, 0xa7a99a);
+  box(latch, solid, .13, .045, -.04, .028, .12, .035, 0xac9a72);
+  const centerBlocker = {
+    x0: gate.x - gHalf,
+    x1: gate.x + gHalf,
+    z0: 19.60,
+    z1: 19.82,
+    active: true,
+    rounded: true
+  };
+  obstacles.push(centerBlocker);
+
+  const portonDoor = {
     id: 'porton',
     label: 'Portón Exterior',
     locked: true,
+    swingSign: -1,
     open: 0,
     targetOpen: 0,
     rattle: 0,
@@ -1354,10 +1446,83 @@ export function buildRooms({
     bounce: 0,
     pos: { x: gate.x, y: 1.15, z: 19.52 },
     threshold: { x0: -17.60, x1: -14.40, z0: 19.25, z1: 19.85 },
-    pivots: [{ group: gateGroup, hand: 1, maxAngle: 0.05 }],
-    handles: [gateHandle],
-    obstacle: null
-  });
+    pivots: gatePivots,
+    handles: gateHandles,
+    obstacle: centerBlocker
+  };
+  doors.push(portonDoor);
+
+  specials.gateControl = {
+    door: portonDoor,
+    setLatch(t) { latch.position.x = gate.x + .32 * t; latch.visible = t < .99; },
+    setLockVisual(kind, unlocked) {
+      if (kind === 'boltCutters') {
+        lockChainGroup.visible = !unlocked;
+      } else if (kind === 'fuse') {
+        fuseLedRed.visible = !unlocked;
+        fuseLedGreen.visible = unlocked;
+        fusePlug.visible = unlocked;
+      } else if (kind === 'masterKey') {
+        keyLedRed.visible = !unlocked;
+        keyLedGreen.visible = unlocked;
+        keyBlade.visible = unlocked;
+      }
+    },
+    reset() {
+      latch.position.x = gate.x;
+      latch.visible = true;
+      portonDoor.locked = true;
+      portonDoor.open = 0;
+      portonDoor.targetOpen = 0;
+      centerBlocker.active = true;
+      lockChainGroup.visible = true;
+      fuseLedRed.visible = true;
+      fuseLedGreen.visible = false;
+      fusePlug.visible = false;
+      keyLedRed.visible = true;
+      keyLedGreen.visible = false;
+      keyBlade.visible = false;
+    }
+  };
+  specials.breaker = { pos: { x: 13.84, y: 1.66, z: -21.38 }, label: 'Tablero B' };
+  specials.monitor = { pos: { x: -24.35, y: 1.00, z: 17.50 }, label: 'Monitor Seguridad' };
+
+  // =====================================================================
+  // EXPANDED EXTERIOR CAMPUS AVENUE (z = 19.60..48.00)
+  // Visible beyond Portón Exterior and traversed during Intro & Escape!
+  // =====================================================================
+  // Exterior sidewalk & paved campus avenue
+  box(root, plazaFloorMat, -16.0, -.066, 23.2, 24.0, .132, 7.2, 0x9aa39a);
+  box(root, solid, -16.0, -.072, 37.4, 30.0, .132, 21.2, 0x242b29);
+  // Sidewalk curbs flanking the exit avenue
+  box(root, solid, -16.0, .02, 26.85, 24.0, .09, .24, 0x778078);
+  for (let i = 0; i < 6; i++) {
+    box(root, solid, -24.5 + i * 3.4, .012, 33.4, 1.8, .02, .14, 0xcac6ae);
+  }
+  // Exterior campus avenue streetlamps (x = -12.2, -19.8; z = 27.5, 37.5)
+  for (const lz of [27.5, 37.5]) {
+    for (const lx of [-12.2, -19.8]) {
+      cylinder(root, solid, lx, .18, lz, .14, .18, .36, 0x262e2c, 8);
+      cylinder(root, solid, lx, 1.88, lz, .052, .082, 3.04, 0x262e2c, 8);
+      box(root, solid, lx, 3.45, lz, .24, .05, .24, 0x262e2c);
+      box(root, sconceGlassMat, lx, 3.59, lz, .18, .22, .18, 0xffe4aa);
+      box(root, luminous, lx, 3.59, lz, .10, .12, .10, 0xfff5d4);
+      cylinder(root, solid, lx, 3.74, lz, .04, .18, .12, 0x262e2c, 4).rotation.y = Math.PI / 4;
+    }
+  }
+  // Campus trees along exterior avenue
+  for (const [tx, tz] of [[-23.2, 24.8], [-8.8, 24.8], [-23.8, 35.2], [-8.2, 36.2]]) {
+    cylinder(root, barkMat, tx, 1.35, tz, .16, .24, 2.7, 0x7a6f66, 7);
+    box(root, foliageMat, tx, 3.15, tz, 1.85, 1.45, 1.85, 0x60725f);
+    box(root, foliageMat, tx + .2, 3.85, tz - .1, 1.25, 0.95, 1.25, 0x526351);
+  }
+  // Campus bus shelter silhouette along outer curb
+  const busStop = group(root, -9.6, 30.8, -Math.PI / 2);
+  box(busStop, solid, 0, .04, 0, 3.2, .08, 1.4, 0x56605a);
+  box(busStop, solid, 0, 2.28, 0, 3.3, .08, 1.5, 0x35403c);
+  for (const bx of [-1.45, 1.45]) box(busStop, solid, bx, 1.15, -.55, .08, 2.24, .08, 0x2a3330);
+  box(busStop, doorGlass, 0, 1.15, -.58, 2.8, 2.1, .02, 0x9ab0ad);
+  box(busStop, wood, 0, .46, -.28, 2.4, .06, .42, 0x8d7150);
 
   // Rotonda Árbol Central (stepped stone fountain + gnarled dead horror tree)
   const ft = plaza.fountain;

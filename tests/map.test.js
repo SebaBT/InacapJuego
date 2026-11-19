@@ -117,7 +117,7 @@ test('a noise behind the closed classroom door draws the monster inside, and a p
   const r = rooms[0], door = map.doors.find(d => d.id === r.id);
   const ctrl = createDoorController({ doors: map.doors, audio: {} });
   const start = { x: hall.halfWidth - 2.3, z: r.doorZ, yaw: -Math.PI / 2 };
-  const hunt = createMonsterHunt({ obstacles: map.obstacles, doors: map.doors, holdDoor: ctrl.holdForMonster, spawn: start });
+  const hunt = createMonsterHunt({ obstacles: map.obstacles, doors: map.doors, holdDoor: ctrl.holdForMonster, spawn: start, patrolPoints: [start] });
   const p = { x: hall.halfWidth + 4.8, z: r.doorZ, cameraY: 1.19, active: true, noiseRadius: 14 };
   const s = hunt.update(.05, p);
   assert.equal(s.mode, 'investigate');
@@ -171,7 +171,7 @@ test('the suit never grabs during a door manoeuvre and resumes a normal capture 
   for (let i = 0; i < 12; i++) ctrl.update(.05, null, false);
   ctrl.holdForMonster(null);
   const hunt = createMonsterHunt({ obstacles: map.obstacles, doors: map.doors, holdDoor: ctrl.holdForMonster,
-    spawn: { x: hall.halfWidth + 4.2, z: r.doorZ, yaw: -Math.PI / 2 } });
+    spawn: { x: hall.halfWidth + 4.2, z: r.doorZ, yaw: -Math.PI / 2 }, patrolPoints: [] });
   // The player waits in the middle of the doorway while the suit folds,
   // crosses and unfolds. It must neither grab nor kill until it is wide again.
   const p = { active: true, x: hall.halfWidth - .05, z: r.doorZ, cameraY: 1.61 };
