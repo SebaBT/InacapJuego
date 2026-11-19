@@ -1,0 +1,17 @@
+{
+  "name": "pabellon-b",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "esbuild src/main.js --bundle --minify --format=iife --target=es2020 --legal-comments=eof --loader:.glb=binary --outfile=dist/pasillo.js",
+    "dev": "npm run build -- --servedir=. --serve=127.0.0.1:8000"
+  },
+  "dependencies": {
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

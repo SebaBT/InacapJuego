@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#141815">
+  <meta name="description" content="Un pasillo universitario para recorrer en primera persona.">
+  <title>Pabellón B · Pasillo universitario</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script defer src="./dist/pasillo.js"></script>
+</head>
+<body>
+  <main id="game">
+    <canvas id="view" tabindex="-1" aria-label="Pasillo universitario en primera persona" aria-describedby="help"></canvas>
+    <div class="breath-vignette" aria-hidden="true"></div>
+    <div class="eyelids" aria-hidden="true"></div>
+    <div class="capture-blackout" aria-hidden="true"></div>
+    <div class="reticle" aria-hidden="true"></div>
+    <p id="interact-prompt" class="interact-prompt" aria-live="polite"></p>
+    <div id="sprint" class="sprint-bar" aria-hidden="true"><div id="sprint-fill"></div></div>
+    <section class="controls" aria-labelledby="menu-title">
+      <header class="menu-cover">
+        <div class="menu-imprint">
+          <p class="menu-tab" id="menu-context" aria-live="polite">Pasillo universitario</p>
+          <h1 id="menu-title">Pabellón B</h1>
+          <button id="enter" type="button" disabled>
+            <span class="play-mark" aria-hidden="true"></span>
+            <span id="enter-label">Iniciar recorrido</span>
+            <kbd class="enter-key" aria-hidden="true">Intro</kbd>
+          </button>
+        </div>
+      </header>
+      <div class="menu-sheet">
+        <section id="help" aria-labelledby="help-title">
+          <h2 id="help-title" class="sheet-title">Controles</h2>
+          <dl class="bindings desktop-help">
+            <div><dt>Caminar</dt><dd><kbd>WASD</kbd></dd></div>
+            <div><dt id="look-label">Mirar</dt><dd>Mouse</dd></div>
+            <div><dt>Correr</dt><dd><kbd>Shift</kbd></dd></div>
+            <div><dt>Saltar</dt><dd><kbd>Espacio</kbd></dd></div>
+            <div><dt>Agacharse</dt><dd>Mantén <kbd>C</kbd></dd></div>
+            <div><dt>Abrir / usar</dt><dd><kbd>E</kbd></dd></div>
+            <div><dt>Cámara</dt><dd><kbd>V</kbd></dd></div>
+            <div><dt>Pausar</dt><dd><kbd>Esc</kbd></dd></div>
+          </dl>
+          <dl class="bindings touch-help">
+            <div><dt>Caminar</dt><dd>Arrastra la palanca</dd></div>
+            <div><dt>Correr</dt><dd>Desde el centro, empuja el dedo más allá del aro hasta que la palanca ceda</dd></div>
+            <div><dt>Mirar</dt><dd>Desliza en la escena</dd></div>
+            <div><dt>Saltar</dt><dd>Toca «Saltar»</dd></div>
+            <div><dt>Abrir / usar</dt><dd>Toca al acercarte</dd></div>
+            <div><dt>Agacharse</dt><dd>Toca para alternar la postura</dd></div>
+            <div><dt>Cámara</dt><dd>Toca «3.ª persona»</dd></div>
+            <div><dt>Pausar</dt><dd>Toca <span aria-label="Pausa">Ⅱ</span></dd></div>
+          </dl>
+        </section>
+        <div id="sound-control" class="sound-control" data-sound-level="high" role="group" aria-labelledby="volume-title">
+          <label id="volume-title" class="sheet-title" for="sound-volume">Volumen</label>
+          <output id="sound-volume-val" for="sound-volume" aria-live="off">100 %</output>
+          <div class="sound-adjust">
+            <button id="sound-toggle" type="button" aria-pressed="false" aria-label="Silenciar sonido" title="Silenciar sonido">
+              <svg class="sound-icon" viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
+                <path d="M3 7.5h3.4L11 3.7v12.6L6.4 12.5H3z" fill="currentColor"/>
+                <path class="wave-near" d="M13.6 7.3a3.9 3.9 0 0 1 0 5.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path class="wave-far" d="M15.8 5.1a6.9 6.9 0 0 1 0 9.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                <path class="mute-x" d="M13.6 7.6l4.2 4.8m0-4.8l-4.2 4.8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <input id="sound-volume" type="range" min="0" max="100" step="1" value="100" aria-label="Volumen del sonido" aria-valuetext="100 %">
+          </div>
+        </div>
+      </div>
+    </section>
+    <div id="stick" role="group" aria-label="Palanca de movimiento. Empuja el dedo más allá del aro para correr.">
+      <span class="stick-thumb" aria-hidden="true"></span>
+      <span class="stick-label" aria-hidden="true">Correr</span>
+    </div>
+    <div class="touch-actions">
+      <button id="interact-btn" type="button" hidden>Abrir / usar</button>
+      <button type="button" id="crouch-btn" aria-label="Agacharse" aria-pressed="false">Agacharse</button>
+      <button type="button" id="jump-btn">Saltar</button>
+    </div>
+    <div class="hud-top">
+      <button id="camera-btn" type="button" aria-pressed="false" aria-label="Cambiar a tercera persona" title="Cambiar a tercera persona (V)">
+        <svg class="camera-icon" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+          <circle cx="10" cy="6.2" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M5.2 16.4c.5-3 2.4-4.7 4.8-4.7s4.3 1.7 4.8 4.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M2.2 10.5c0 2.3 3.5 4.1 7.8 4.1s7.8-1.8 7.8-4.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2 2"/>
+        </svg>
+        <span class="camera-label">3.ª persona</span>
+        <kbd class="camera-key" aria-hidden="true">V</kbd>
+      </button>
+      <button id="pause" aria-label="Pausar recorrido" type="button">Ⅱ</button>
+    </div>
+    <dialog id="debug" aria-labelledby="debug-title">
+      <header><h2 id="debug-title">Depuración</h2><button type="button" id="debug-close" aria-label="Cerrar depuración">×</button></header>
+      <p id="model-stats"></p>
+      <fieldset><legend>Vista de La Veladora</legend>
+        <div class="views">
+          <button type="button" data-view="front">Frente</button>
+          <button type="button" data-view="quarter">Tres cuartos</button>
+          <button type="button" data-view="back">Espalda</button>
+          <button type="button" data-view="face">Rostro</button>
+        </div>
+      </fieldset>
+      <fieldset><legend>Expresión</legend>
+        <div class="views">
+          <button type="button" data-expression="normal" aria-pressed="true">Normal</button>
+          <button type="button" data-expression="chase" aria-pressed="false">Persecución</button>
+          <button type="button" data-expression="scream" aria-pressed="false">Grito</button>
+        </div>
+      </fieldset>
+      <fieldset><legend>Animación</legend>
+        <div class="views anims">
+          <button type="button" data-animation="idle" aria-pressed="true">Reposo</button>
+          <button type="button" data-animation="walk" aria-pressed="false">Caminando</button>
+          <button type="button" data-animation="run" aria-pressed="false">Corriendo</button>
+          <button type="button" data-animation="grab" aria-pressed="false">Agarre y grito</button>
+        </div>
+      </fieldset>
+      <fieldset><legend>Cuerpo del jugador (Mii)</legend>
+        <div class="views">
+          <button type="button" data-player-body="streetpass" aria-pressed="true">StreetPass</button>
+          <button type="button" data-player-body="switch" aria-pressed="false">Switch (piernas)</button>
+          <button type="button" data-player-body="hidden" aria-pressed="false">Oculto</button>
+        </div>
+      </fieldset>
+      <fieldset class="wear-setting">
+        <div class="wear-reading"><label for="wear-slider">Rotura del traje</label><output id="suit-wear" for="wear-slider" aria-live="off">0 %</output></div>
+        <div class="wear-controls">
+          <input type="range" id="wear-slider" min="0" max="100" step="1" value="0" aria-valuetext="0 %">
+          <button type="button" id="wear-auto" disabled>Reanudar</button>
+        </div>
+      </fieldset>
+      <label><input type="checkbox" id="debug-wire"> Malla alámbrica</label>
+      <label><input type="checkbox" id="debug-bounds"> Volúmenes de colisión</label>
+      <label><input type="checkbox" id="debug-noclip"> Noclip</label>
+      <p id="noclip-hint" hidden>Vuela hacia donde miras · <kbd>Espacio</kbd> subir · <kbd>Shift</kbd> / <kbd>C</kbd> bajar</p>
+      <fieldset class="env-section">
+        <legend>Ambiente e iluminación</legend>
+        <div class="views anims">
+          <button type="button" data-env-preset="tetrica" aria-pressed="true">Tétrica</button>
+          <button type="button" data-env-preset="falla" aria-pressed="false">Falla</button>
+          <button type="button" data-env-preset="apagon" aria-pressed="false">Apagón</button>
+          <button type="button" data-env-preset="normal" aria-pressed="false">Original</button>
+        </div>
+        <div class="env-lamps-head">
+          <span>Tubos del techo</span>
+          <button type="button" id="env-surge">Sobrecarga</button>
+        </div>
+        <div class="views lamps">
+          <button type="button" data-lamp="0" data-lamp-mode="auto" title="Tubo 1: Auto">1</button>
+          <button type="button" data-lamp="1" data-lamp-mode="auto" title="Tubo 2: Auto">2</button>
+          <button type="button" data-lamp="2" data-lamp-mode="auto" title="Tubo 3: Auto">3</button>
+          <button type="button" data-lamp="3" data-lamp-mode="auto" title="Tubo 4: Auto">4</button>
+          <button type="button" data-lamp="4" data-lamp-mode="auto" title="Tubo 5: Auto">5</button>
+          <button type="button" data-lamp="5" data-lamp-mode="auto" title="Tubo 6: Auto">6</button>
+        </div>
+        <div class="env-sliders">
+          <div class="wear-reading"><label for="env-flicker">Parpadeo</label><output id="env-flicker-val" for="env-flicker" aria-live="off">85 %</output></div>
+          <input type="range" id="env-flicker" min="0" max="150" step="1" value="85">
+          <div class="wear-reading"><label for="env-speed">Velocidad</label><output id="env-speed-val" for="env-speed" aria-live="off">100 %</output></div>
+          <input type="range" id="env-speed" min="25" max="250" step="5" value="100">
+          <div class="wear-reading"><label for="env-ambient">Luz ambiente</label><output id="env-ambient-val" for="env-ambient" aria-live="off">26 %</output></div>
+          <input type="range" id="env-ambient" min="0" max="100" step="1" value="26">
+          <div class="wear-reading"><label for="env-lamps">Luz del techo</label><output id="env-lamps-val" for="env-lamps" aria-live="off">86 %</output></div>
+          <input type="range" id="env-lamps" min="0" max="150" step="1" value="86">
+          <div class="wear-reading"><label for="env-monster-light">Luz en monstruo</label><output id="env-monster-light-val" for="env-monster-light" aria-live="off">145 %</output></div>
+          <input type="range" id="env-monster-light" min="0" max="250" step="5" value="145">
+          <div class="wear-reading"><label for="env-tint">Tinte tétrico</label><output id="env-tint-val" for="env-tint" aria-live="off">85 %</output></div>
+          <input type="range" id="env-tint" min="0" max="100" step="1" value="85">
+          <div class="wear-reading"><label for="env-fog">Niebla</label><output id="env-fog-val" for="env-fog" aria-live="off">105 %</output></div>
+          <input type="range" id="env-fog" min="0" max="180" step="1" value="105">
+          <div class="wear-reading"><label for="env-windows">Ventanas</label><output id="env-windows-val" for="env-windows" aria-live="off">25 %</output></div>
+          <input type="range" id="env-windows" min="0" max="100" step="1" value="25">
+          <div class="wear-reading"><label for="env-vignette">Viñeta</label><output id="env-vignette-val" for="env-vignette" aria-live="off">30 %</output></div>
+          <input type="range" id="env-vignette" min="0" max="60" step="1" value="30">
+        </div>
+        <label><input type="checkbox" id="env-flicker-enabled" checked> Parpadeo activo</label>
+        <label><input type="checkbox" id="env-audio-enabled" checked> Zumbido eléctrico</label>
+      </fieldset>
+      <fieldset class="env-section">
+        <legend>Escombros en el suelo</legend>
+        <div class="env-sliders">
+          <div class="wear-reading"><label for="debris-density">Cantidad</label><output id="debris-val" for="debris-density" aria-live="off">50 %</output></div>
+          <input type="range" id="debris-density" min="0" max="100" step="1" value="50" aria-valuetext="50 %">
+        </div>
+        <div class="views">
+          <button type="button" data-debris-preset="0" aria-pressed="false">Nada</button>
+          <button type="button" data-debris-preset="0.25" aria-pressed="false">Poco</button>
+          <button type="button" data-debris-preset="0.5" aria-pressed="true">Normal</button>
+          <button type="button" data-debris-preset="1" aria-pressed="false">Mucho</button>
+        </div>
+      </fieldset>
+    </dialog>
+    <p id="message" role="status" aria-live="polite"></p>
+    <noscript>Activa JavaScript para recorrer el pasillo.</noscript>
+  </main>
+</body>
+</html>
