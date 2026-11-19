@@ -42,12 +42,12 @@ export const ITEM_CATALOG = Object.freeze({
   decoy: {
     id: 'decoy', category: 'tool', label: 'Despertador señuelo', short: 'Señuelo',
     purpose: 'La distrae si no te ve, hasta el frenesí.',
-    action: 'Lanzar señuelo', halo: 0xffb265
+    action: 'Lanzar', halo: 0xffb265
   },
   flash: {
     id: 'flash', category: 'tool', label: 'Flash de mano', short: 'Flash',
     purpose: 'Aturde a La Veladora de cerca durante 4 s.',
-    action: 'Disparar flash', halo: 0xadf2ff
+    action: 'Disparar', halo: 0xadf2ff
   },
   tape1: tape(1), tape2: tape(2), tape3: tape(3)
 });

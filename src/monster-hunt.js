@@ -42,6 +42,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
   // The live round always tracks its player. An explicitly authored patrol
   // can still be used for a scripted sequence.
   const tracksPlayer = patrolPoints === null;
+  const patrolRoute = patrolPoints?.length ? patrolPoints : [spawn];
   let pursuitSpeed = 0;
   let route, plannedGoal, crossing, patrolIndex, replanIn, lostTime, searchTime, searchYaw, cryCooldown, searchGoal;
   let crossingGrace, growlCooldown, slamDoor;
@@ -106,6 +107,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     const prev = stunTime;
     stunTime = Math.max(stunTime, Math.max(0.25, duration));
     state.stunned = stunTime;
+    pursuitSpeed = 0;
     releaseThrow();
     if (crossing) {
       crossing = null;
@@ -306,7 +308,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     // Sight of a wall lengthens the stride. Only contact by this frame's
     // moving body breaks it; the look-ahead itself never changes the world.
     const probe = Math.min(dist, Math.max(2.3, activeThreat.chaseSpeed * dt));
-    const { t, obstacle } = nav.firstHit(state, ahead(probe), radius, state.y);
+    const { t, obstacle, point: impactPoint } = nav.firstHit(state, ahead(probe), radius, state.y);
     const contact = obstacle ? probe * t : Infinity;
     const rush = activeThreat.frenzy ? 1 : 1 - ramp(0, 2.3, contact);
     const desired = walkSpeed + (activeThreat.chaseSpeed - walkSpeed) * rush;
@@ -314,14 +316,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     pursuitSpeed += (desired - pursuitSpeed) * (1 - Math.exp(-dt * (desired > pursuitSpeed ? 8 : 2.6)));
     let step = Math.min(dist, pursuitSpeed * dt);
     if (obstacle && contact <= step) {
-      const center = ahead(contact);
-      let x = clamp(center.x, obstacle.x0, obstacle.x1), z = clamp(center.z, obstacle.z0, obstacle.z1);
-      if (obstacle.kind === 'segment') {
-        const vx = obstacle.bx - obstacle.ax, vz = obstacle.bz - obstacle.az;
-        const along = clamp(((center.x - obstacle.ax) * vx + (center.z - obstacle.az) * vz) /
-          (vx * vx + vz * vz || 1), 0, 1);
-        x = obstacle.ax + along * vx; z = obstacle.az + along * vz;
-      }
+      const { x, z } = impactPoint;
       const prop = obstacle.movable && furniture?.byId(obstacle.propId);
       if (prop) {
         furniture.launch(prop, { to: { x: prop.x + uz * 2.8, z: prop.z - ux * 2.8 },
@@ -624,7 +619,7 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
     if (charging) {
       if (crossing || slamDoor) holdDoor(null);
       crossing = slamDoor = plannedGoal = null;
-      route = [];
+      route.length = 0;
       state.fold = 0;
       state.maneuvering = false;
       state.doorPress = 0;
@@ -687,11 +682,11 @@ export function createMonsterHunt({ obstacles, doors, holdDoor = () => {}, close
       if (state.mode === 'search') {
         search(dt);
       } else {
-        const goal = state.mode === 'patrol' ? patrolPoints[patrolIndex]
+        const goal = state.mode === 'patrol' ? patrolRoute[patrolIndex]
           : thresholdGoal(searchGoal ?? state.lastKnown);
         if (travel(goal, dt)) {
           if (state.mode === 'patrol') {
-            patrolIndex = (patrolIndex + 1) % patrolPoints.length;
+            patrolIndex = (patrolIndex + 1) % patrolRoute.length;
             plannedGoal = null;
           } else if (state.visible && (state.mode === 'chase' || state.mode === 'investigate')) {
             // The route ends at the closest padded graph point to the corner.

@@ -300,6 +300,22 @@ test('the live hunt walks after an unseen silent player and breaks walls on the 
   }
 });
 
+test('the locked exit withstands a moving contact and the hunt immediately follows a new heading', () => {
+  const barrier = { x0: -1.6, x1: 1.6, z0: 4, z1: 4.18 };
+  const hunt = createMonsterHunt({ obstacles: [barrier], doors: [{ id: 'porton', obstacle: barrier, pivots: [], locked: true }],
+    spawn: { x: 0, z: 8, yaw: Math.PI } });
+  const target = { x: 0, z: 1, cameraY: 1.61, active: true };
+  for (let i = 0; i < 180; i++) {
+    const state = hunt.update(1/60, target);
+    assert.equal(state.smashedWall, null);
+    assert.ok(state.z >= barrier.z1 + .53 - .001);
+  }
+  assert.notEqual(barrier.active, false);
+  const z = hunt.state.z;
+  target.x = 4; target.z = 8;
+  assert.ok(hunt.update(1/60, target).z > z);
+});
+
 test('a deliberate decoy diverts the walking hunt, then the player immediately becomes its target again', () => {
   const walls = [{ x0: -6, x1: 6, z0: 2, z1: 2.2 }];
   const hunt = createMonsterHunt({ obstacles: walls, doors: [], spawn: { x: 0, z: 6, yaw: 0 } });

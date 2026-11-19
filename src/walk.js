@@ -343,7 +343,8 @@ export function firstPerson(camera, obstacles, wake, {
   function updateHud() {
     stick.classList.toggle('running', touchStick.wantsSprint && stamina.isSprinting);
     if (sprintBar && sprintFill) {
-      const showBar = active && !noclip && (stamina.hudVisibleTimer > 0 || stamina.isSprinting || stamina.exhausted);
+      const showBar = active && !noclip && stamina.stamina < .98 &&
+        (stamina.hudVisibleTimer > 0 || stamina.isSprinting || stamina.exhausted);
       sprintBar.classList.toggle('visible', showBar);
       sprintBar.classList.toggle('exhausted', active && !noclip && stamina.exhausted);
       const reading = stamina.exhausted ? 'Sin aguante' : 'Aguante ' + Math.ceil(stamina.stamina * 10) * 10 + ' %';

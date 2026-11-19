@@ -306,6 +306,7 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   padding: 0 .35em; min-height: 44px; color: inherit; font: inherit; text-shadow: inherit; touch-action: manipulation;
 }
 #interact-btn { top: calc(50% + 12px); padding: 5px 8px; font: 600 14px/1.4 "Segoe UI", sans-serif; white-space: pre-line; }
+#interact-btn, #skip-hint { color: #f4f2e9; text-shadow: 0 1px 3px #111, 0 0 8px #151613; }
 #interact-prompt { display: block; }
 .caption-block { bottom: max(112px, 19%); margin: 0; z-index: 5; pointer-events: none; }
 .playing:not(.inspecting) .caption-block:has(#cine-whisper:not(:empty)) { display: block; }
@@ -322,7 +323,7 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 #held-name { font-weight: 600; }
 #equip-prev, #equip-next { min-width: 36px; font-size: 22px; line-height: 1; }
 #use-btn { margin-inline-start: 6px; align-items: center; }
-#skip-hint[hidden], .equipment [hidden] { display: none; }
+#skip-hint[hidden], #held-readout[hidden], #use-btn[hidden], .equipment [hidden] { display: none; }
 :is(#skip-hint, #interact-btn, .equipment button, .touch-actions button):focus-visible {
   outline: 1px solid currentColor; outline-offset: 1px;
 }
@@ -490,6 +491,10 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 }
 .playing .hud-top :is(svg,kbd,.camera-label) { display: none; }
 .playing .hud-top .play-label { display: inline; }
+@media (max-width: 600px) and (orientation: portrait) {
+  .touch .equipment { bottom: max(139px, calc(env(safe-area-inset-bottom) + 127px)); }
+  .playing.touch:not(.in-cutscene) .caption-block { bottom: max(206px, 28%); }
+}
 @media (max-height: 500px) {
   #hud-status { top: max(6px, env(safe-area-inset-top)); }
   #mission { margin-top: 0; }

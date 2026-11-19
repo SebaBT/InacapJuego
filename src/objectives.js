@@ -88,9 +88,11 @@ export function createObjectiveGuide(nav) {
     const dx = next.x - pose.x, dz = next.z - pose.z;
     const angle = Math.atan2(dx * Math.cos(pose.yaw) - dz * Math.sin(pose.yaw),
       -dx * Math.sin(pose.yaw) - dz * Math.cos(pose.yaw));
-    const atItem = kind && next === goal && next.x === site.x && next.z === site.z;
-    return { title, destination, item: def?.short ?? 'Portón', next: next.label,
-      landmark: atItem ? destination : next.label, meters: Math.round(distance(pose, next)), angle };
+    const atItem = kind && next.x === site.x && next.z === site.z;
+    const areaLabel = kind ? destination.split(' · ')[0] : 'Plaza';
+    const item = (def?.short ?? 'Portón') + ' · ' + areaLabel;
+    return { title, destination, item, next: next.label,
+      landmark: atItem ? 'Recoger' : next.label, meters: Math.round(distance(pose, next)), angle };
   }
   return { update, reset() { lastPlan = null; route = []; } };
 }

@@ -293,16 +293,30 @@ export function createMonsterNavigation(obstacles, doors) {
   }
   function firstHit(a, b, radius = .02, footY = 0) {
     const dx = b.x - a.x, dz = b.z - a.z;
-    let best = 1, obstacle = null;
+    let best = 1, obstacle = null, point = null;
     for (const o of obstacles) {
       if (o.active === false || o.step || (o.bottom ?? 0) > footY + 2.05 || (o.top ?? Infinity) <= footY + .04) continue;
-      const hit = o.kind === 'segment'
+      const segment = o.kind === 'segment';
+      let t = segment
         ? raycastCapsule2D(a.x, a.z, dx, dz, o.ax, o.az, o.bx, o.bz, radius + (o.halfThick ?? .035))
-        : raycastAabb(a.x, 1.1, a.z, dx, 0, dz,
-        o.x0 - radius, -10, o.z0 - radius, o.x1 + radius, 20, o.z1 + radius);
-      if (hit < best) { best = hit; obstacle = o; }
+        : raycastAabb(a.x, 1.1, a.z, dx, 0, dz, o.x0 - radius, -10, o.z0 - radius, o.x1 + radius, 20, o.z1 + radius);
+      if (t >= best) continue;
+      const center = { x: a.x + dx * t, z: a.z + dz * t };
+      const face = segment ? closestOnSegment(center, o.ax, o.az, o.bx, o.bz) :
+        { x: clamp(center.x, o.x0, o.x1), z: clamp(center.z, o.z0, o.z1) };
+      const nx = center.x - face.x, nz = center.z - face.z;
+      const gapSq = nx * nx + nz * nz;
+      // At a rectangular corner the expanded AABB is only a broad phase:
+      // wait for the round body to actually reach the corner.
+      if (!segment && gapSq > radius * radius + 1e-8) {
+        t = raycastCapsule2D(a.x, a.z, dx, dz, face.x, face.z, face.x, face.z, radius);
+        if (t >= best) continue;
+      }
+      // Touching a protected gate must still allow a tangential or retreating step.
+      if (t <= 1e-8 && gapSq > 1e-10 && nx * dx + nz * dz >= 0) continue;
+      best = t; obstacle = o; point = face;
     }
-    return { t: best, obstacle };
+    return { t: best, obstacle, point };
   }
   function route(start, goal) {
     const from = areaAt(start), to = areaAt(goal);

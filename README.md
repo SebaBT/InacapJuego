@@ -1,4 +1,4 @@
-﻿# Pabellón B — InacapJuego
+# Pabellón B — InacapJuego
 
 Juego 3D de terror en primera persona ambientado en un pasillo universitario, construido con Three.js y empaquetado con `esbuild`.
 

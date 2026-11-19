@@ -1,4 +1,4 @@
-﻿node_modules
+node_modules
 .git
 .playwright-cli
 .playwright-mcp
