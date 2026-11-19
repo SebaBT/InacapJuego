@@ -54,7 +54,7 @@ before(() => {
   }
 });
 
-test('La Veladora opens all real passages, folds on the way in and out, and climbs the annex stairs', () => {
+test('Mothy opens all real passages, folds on the way in and out, and climbs the annex stairs', () => {
   const absent = { active: true, x: 80, z: 23, cameraY: 1.61, noiseRadius: 0 };
   const step = .06;
   for (const r of [...rooms, annex]) {

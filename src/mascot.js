@@ -364,7 +364,7 @@ export function makeMascot(makeMaterial) {
   const back = makeMaterial(feltPanel(true), { emission: .03, monster: true });
   const velvet = makeMaterial(weave, { emission: .04, monster: true });
   for (const m of [front, back, hoodRim, velvet, fabric]) m.side = DoubleSide;
-  const root = new Group(); root.name = 'La Veladora';
+  const root = new Group(); root.name = 'Mothy';
   root.position.set(monsterSpawn.x, 0, monsterSpawn.z);
   const torso = joint(root, 'Torso', 0, bottom, 0);
   const body = shell(torso, front, back, hoodRim);

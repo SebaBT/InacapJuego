@@ -573,7 +573,7 @@ export function createMonsterNavigation(obstacles, doors) {
     canReach(a, b) {
       // Only full-height architecture stops the arms. A low desk, a bench, a
       // crate or any movable prop must never keep the suit from grabbing a
-      // player pressed against it: La Veladora's long arms reach over them.
+      // player pressed against it: Mothy's long arms reach over them.
       const tall = obstacles.filter(o => o.active !== false && !o.step && !o.movable &&
         (o.top ?? o.sightTop ?? 20) >= 1.75);
       // Grazing a wall corner beside or behind a crouched body still counts as

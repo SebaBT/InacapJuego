@@ -6,7 +6,7 @@ export const LORE_ITEMS = Object.freeze(['tape1', 'tape2', 'tape3']);
 export const TOOL_ITEMS = Object.freeze(['energy', 'roid', 'flash']);
 
 export const THREAT_STAGES = [
-  { name: 'Acecho', effect: 'La Veladora sigue tus pasos.' },
+  { name: 'Acecho', effect: 'Mothy sigue tus pasos.' },
   { name: 'Alerta', effect: 'Se acerca más rápido.' },
   { name: 'Cacería', effect: 'Ya puede romper muros.' },
   { name: 'Frenesí', effect: 'Corre sin descanso y rompe todo a su paso.' }

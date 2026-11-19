@@ -62,7 +62,7 @@ El juego ya usa el motor a través de `src/music.js`:
   de la partida a los ocho estados.
 - Sigue el volumen y el mute del control de sonido existente.
 - `paused` es un tratamiento sobre la pieza que estaba sonando.
-- Con `roid` o `flash`, cuando La Veladora huye o queda aturdida, vuelve a `ambient`.
+- Con `roid` o `flash`, cuando Mothy huye o queda aturdida, vuelve a `ambient`.
 - El estado actual queda visible en `#game[data-music]` para depurar.
 
 La lógica de decisión está aislada en `resolveMusicState()` y cubierta por

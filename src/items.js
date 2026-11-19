@@ -38,12 +38,12 @@ export const ITEM_CATALOG = Object.freeze({
   },
   roid: {
     id: 'roid', category: 'tool', label: 'Spray Roid', short: 'Roid',
-    purpose: 'Rocía a La Veladora para que huya corriendo unos segundos.',
-    action: 'Rociar', result: 'La Veladora huye', halo: 0xb6ff7a
+    purpose: 'Rocía a Mothy para que huya corriendo unos segundos.',
+    action: 'Rociar', result: 'Mothy huye', halo: 0xb6ff7a
   },
   flash: {
     id: 'flash', category: 'tool', label: 'Flash de mano', short: 'Flash',
-    purpose: 'Aturde a La Veladora de cerca durante 4 s.',
+    purpose: 'Aturde a Mothy de cerca durante 4 s.',
     action: 'Disparar', halo: 0xadf2ff
   },
   tape1: tape(1), tape2: tape(2), tape3: tape(3)

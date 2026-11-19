@@ -1,4 +1,4 @@
-// La Veladora's voice. A sub-bass chest carries the vowel, a loose saw throat
+// Mothy's voice. A sub-bass chest carries the vowel, a loose saw throat
 // supplies the growl, and low-passed breath glues the layers together. Every
 // band stays below the whistle range so a phone speaker feels weight, not a
 // shriek, and both calls share one gentle ceiling.

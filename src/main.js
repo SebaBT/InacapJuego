@@ -333,13 +333,13 @@ async function start() {
       if (menuCaption) menuCaption.textContent = '03:00 · Tiempo agotado';
       if (menuTitle) menuTitle.textContent = 'Encerrado';
     } else {
-      if (menuCaption) menuCaption.textContent = 'La Veladora te atrapó';
+      if (menuCaption) menuCaption.textContent = 'Mothy te atrapó';
       if (menuTitle) menuTitle.textContent = 'Has caído';
     }
     write(menuBrief, isWin ? (outcome === OUTCOMES.VICTORY_COMPLETE
       ? 'Las tres cintas llegaron al otro lado del portón.' : 'Lograste salir antes del cierre. Las tres cintas revelan el final completo.')
       : outcome === OUTCOMES.DEFEAT_TIMEOUT ? 'El cierre de seguridad bloqueó el pabellón.'
-      : 'La Veladora te alcanzó. Un flash puede darte tiempo para escapar.');
+      : 'Mothy te alcanzó. Un flash puede darte tiempo para escapar.');
     updateSummaryChips();
     if (menuSummary) menuSummary.hidden = false;
     if (enterLabel) enterLabel.textContent = 'Reintentar';
@@ -466,7 +466,7 @@ async function start() {
     if (specials.monitor && lookingAt(pose, specials.monitor.pos, 2.4, 0.45)) {
       return match.cameraPingCooldown > 0
         ? `Radar ${Math.ceil(match.cameraPingCooldown)}s`
-        : '[E] Localizar a La Veladora';
+        : '[E] Localizar a Mothy';
     }
     return doorCtrl.prompt;
   }
@@ -486,7 +486,7 @@ async function start() {
         handView.inspect(kind);
         setWhisper(`Cintas · ${match.tapesCollected}/${LORE_ITEMS.length}`, 3.3);
       } else if (kind === 'roid') {
-        setWhisper('ROID · apunta a La Veladora y rocía con F', 4.4);
+        setWhisper('ROID · apunta a Mothy y rocía con F', 4.4);
       }
       syncHud();
       wake();
@@ -570,9 +570,9 @@ async function start() {
         gameplayAudio.playRoidSpray(Boolean(roidHit));
         if (roidHit) {
           hunt.repel(ROID_FLEE_SECONDS);
-          setWhisper('ROID · La Veladora huye', 3.4);
+          setWhisper('ROID · Mothy huye', 3.4);
         } else {
-          setWhisper('ROID · apunta a La Veladora', 2.8);
+          setWhisper('ROID · apunta a Mothy', 2.8);
         }
         syncHud();
         wake();
@@ -804,7 +804,7 @@ async function start() {
       doorAudio.silenceMonster();
       gameplayAudio.silence();
       doorAudio.monsterScream('alert', 0.95, 0);
-      setWhisper('La Veladora te atrapó.', 2.65);
+      setWhisper('Mothy te atrapó.', 2.65);
     }
     actor.place(s.x, s.y, s.z, s.yaw);
     actor.setAnimation(s.animation);

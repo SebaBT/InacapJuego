@@ -65,7 +65,7 @@ function findClearLoomSpot(pose, navigation) {
 
 /**
  * Coordinates animated 3D cutscenes (`intro`, `escape`, `timeoutDefeat`)
- * driving the camera, exterior iron gate, Mii runner, and La Veladora
+ * driving the camera, exterior iron gate, Mii runner, and Mothy
  * with smooth visual transitions and zero abrupt cuts to black.
  */
 export function createCinematics({
