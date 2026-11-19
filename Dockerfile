@@ -16,7 +16,6 @@ COPY --from=builder /app/index.html /usr/share/nginx/html/index.html
 COPY --from=builder /app/style.css /usr/share/nginx/html/style.css
 COPY --from=builder /app/dist /usr/share/nginx/html/dist
 COPY --from=builder /app/assets /usr/share/nginx/html/assets
-COPY docs /usr/share/nginx/html/docs
 
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
