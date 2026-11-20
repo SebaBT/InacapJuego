@@ -9,6 +9,9 @@ import { firstPerson } from '../src/walk.js';
 function makeElement() {
   const classes = new Set(), attributes = new Map(), captured = new Set();
   return Object.assign(new EventTarget(), {
+    parentElement: null,
+    children: [],
+    append(child) { this.children.push(child); child.parentElement = this; },
     classList: {
       add: name => classes.add(name),
       remove: (...names) => names.forEach(name => classes.delete(name)),
@@ -27,8 +30,9 @@ function makeElement() {
 }
 
 function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], onInteract, onStickDirection, onStartRequest } = {}) {
-  const ids = ['game', 'view', 'enter', 'enter-label', 'message', 'stick', 'pause', 'interact-btn', 'crouch-btn', 'jump-btn', 'run-btn'];
+  const ids = ['game', 'view', 'enter', 'enter-label', 'message', 'stick', 'pause', 'interact-btn', 'use-btn', 'crouch-btn', 'jump-btn', 'run-btn'];
   const elements = new Map(ids.map(id => ['#' + id, makeElement()]));
+  elements.set('.touch-actions', makeElement());
   const padRect = { left: 18, top: 230, width: 128, height: 128 };
   elements.get('#stick').getBoundingClientRect = () => padRect;
   let time = 0;
@@ -65,7 +69,7 @@ function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], on
     }
   }
   return {
-    walk, camera, frames, touch,
+    walk, camera, frames, touch, elements,
     canvas: elements.get('#view'),
     button: elements.get('#crouch-btn'),
     click: (id, detail = 0) => elements.get('#' + id).dispatchEvent(Object.assign(new Event('click'), { detail })),
@@ -435,6 +439,20 @@ test('interrupted or lost touches can never leave the pad stuck', t => {
   click('enter');
   frames(30);
   assert.equal(walk.pose.wishVx, 0);
+});
+
+test('on touch screens recoger and usar move into the thumb action pad', t => {
+  const { elements } = setupWalk(t, { coarse: true });
+  const bar = elements.get('.touch-actions');
+  assert.deepEqual(bar.children, [elements.get('#interact-btn'), elements.get('#use-btn')]);
+  assert.equal(elements.get('#interact-btn').parentElement, bar);
+  assert.equal(elements.get('#use-btn').parentElement, bar);
+});
+
+test('a fine pointer keeps recoger and usar out of the hidden touch pad', t => {
+  const { elements } = setupWalk(t, { coarse: false });
+  assert.equal(elements.get('.touch-actions').children.length, 0);
+  assert.equal(elements.get('#interact-btn').parentElement, null);
 });
 
 test('the separate run button latches a run only while the pad is held', t => {

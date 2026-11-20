@@ -672,22 +672,22 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
 
 /* Touch controls: big, solid targets that react on contact. */
 .touch-actions {
-  grid-template-columns: repeat(2, auto); gap: 12px; align-items: end;
+  grid-template-columns: 68px 68px; gap: 12px; align-items: end; justify-items: center;
   bottom: max(22px, calc(env(safe-area-inset-bottom) + 12px)); right: max(16px, env(safe-area-inset-right));
 }
 .touch-actions button {
-  display: grid; place-items: center; align-content: center; gap: 2px; width: 64px; height: 64px; min-width: 64px; min-height: 64px;
+  display: grid; place-items: center; align-content: center; gap: 2px; width: 56px; height: 56px; min-width: 56px; min-height: 56px;
   padding: 0; border: 1px solid rgb(242 239 223 / .55); border-radius: 50%; background: rgb(14 18 16 / .5);
   box-shadow: 0 2px 8px #0009; -webkit-user-select: none; user-select: none; touch-action: none;
   transition: background-color 90ms ease, transform 90ms ease;
 }
 .touch-actions button:active { transform: scale(.94); background: rgb(242 239 223 / .26); }
 .touch-actions button:disabled { opacity: .4; }
-.touch-actions .hud-icon { width: 26px; height: 26px; }
+.touch-actions .hud-icon { width: 22px; height: 22px; }
 .touch-actions .action-label { font: 600 10px/1 var(--mono); letter-spacing: .02em; }
-#jump-btn { grid-column: 2; grid-row: 2; width: 76px; height: 76px; min-width: 76px; min-height: 76px; }
-#run-btn { grid-column: 1; grid-row: 2; }
-#crouch-btn { grid-column: 2; grid-row: 1; }
+#jump-btn { grid-area: 3 / 2; width: 56px; height: 56px; min-width: 56px; min-height: 56px; }
+#run-btn { grid-area: 3 / 1; }
+#crouch-btn { grid-area: 2 / 2; }
 .touch-actions [aria-pressed="true"] { background: rgb(242 239 223 / .88); color: var(--ink); border-color: var(--ivory); text-shadow: none; box-shadow: 0 2px 8px #0009; }
 #run-btn.running { background: #f3c86c; border-color: #f3c86c; }
 .touch #equip-slots { gap: 8px; }
@@ -707,9 +707,37 @@ body:not(.touch) #game:not(.touch) .touch-only { display: none; }
   background: rgb(14 18 16 / .6); font-size: 16px; touch-action: none; -webkit-user-select: none; user-select: none;
 }
 .touch #interact-btn:active { background: rgb(242 239 223 / .28); }
+/* Agarrar y Usar son botones redondos como Correr/Saltar: icono arriba y la
+   acción en letra pequeña debajo, sin tarjetas de texto que rompan el pad. */
+.touch-actions #use-btn,
+.touch-actions #interact-btn {
+  width: 56px; min-width: 56px; max-width: 56px;
+  height: 56px; min-height: 56px; max-height: 56px;
+  padding: 0; border-radius: 50%; white-space: normal; gap: 2px;
+  flex-direction: column; align-items: center; justify-content: center;
+  background: rgb(14 18 16 / .5); border: 1px solid rgb(242 239 223 / .55);
+  box-shadow: 0 2px 8px #0009;
+}
+.touch-actions #interact-btn {
+  grid-area: 1 / 2;
+  position: static; left: auto; top: auto; transform: none;
+}
+.touch-actions #use-btn { grid-area: 2 / 1; }
+/* La regla que muestra el botón usa display:block; aquí lo centramos como rejilla. */
+.playing:not(.captured):not(.inspecting):not(.in-cutscene) .touch-actions #interact-btn:not([hidden]) {
+  display: grid; place-items: center; align-content: center;
+}
+.touch-actions #interact-btn .hud-icon,
+.touch-actions #use-btn .hud-icon { width: 18px; height: 18px; }
+.touch-actions #interact-prompt,
+.touch-actions #held-action {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+  max-width: 50px; margin: 0 auto; overflow: hidden; text-align: center; white-space: normal;
+  font: 600 7.5px/1.05 var(--mono); letter-spacing: 0;
+}
 @media (max-width: 600px) and (orientation: portrait) {
-  .touch .equipment { bottom: max(196px, calc(env(safe-area-inset-bottom) + 186px)); }
-  .playing.touch:not(.in-cutscene) .caption-block { bottom: max(340px, 40%); }
+  .touch .equipment { bottom: max(226px, calc(env(safe-area-inset-bottom) + 216px)); }
+  .playing.touch:not(.in-cutscene) .caption-block { bottom: max(374px, 40%); }
   .touch #equip-slots { gap: 5px; }
   .touch #equip-slots .inv-slot { width: clamp(40px, 13vw, 50px); }
 }

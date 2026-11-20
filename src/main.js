@@ -1021,7 +1021,11 @@ async function start() {
 
     const promptText = computePromptText(pose);
     const touch = game.classList.contains('touch');
-    write(interactPrompt, touch ? promptText.replace('[E] ', '') : promptText.replace('[E] ', 'E · '));
+    // The touch button is small: keep only the action ("Recoger botiquín")
+    // and drop the explanatory second line that fits under the desktop reticle.
+    write(interactPrompt, touch
+      ? promptText.replace('[E] ', '').split('\n')[0]
+      : promptText.replace('[E] ', 'E · '));
     if (interactBtn) interactBtn.hidden = !promptText;
 
     const hand = handView.update(dt, reducedMotionQuery.matches);

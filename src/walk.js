@@ -212,6 +212,18 @@ export function firstPerson(camera, obstacles, wake, {
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
   const coarse = matchMedia('(pointer: coarse)');
   game.classList.toggle('touch', coarse.matches);
+
+  // On a phone the contextual actions (recoger / usar) belong in the thumb pad
+  // instead of the centre of the screen, where a thumb can never reach them.
+  const touchActions = document.querySelector('.touch-actions');
+  function adoptTouchActions() {
+    if (!touchActions?.append) return;
+    for (const selector of ['#interact-btn', '#use-btn']) {
+      const button = document.querySelector(selector);
+      if (button && button.parentElement !== touchActions) touchActions.append(button);
+    }
+  }
+  if (game.classList.contains('touch')) adoptTouchActions();
   const position = { x: 0, y: eyeHeight, z: 0 };
   let yaw = 0, pitch = 0, vx = 0, vy = 0, vz = 0;
   let active = false, locked = false, dragMode = false, noclip = false;
@@ -600,7 +612,10 @@ export function firstPerson(camera, obstacles, wake, {
     // real click so a later "continue" keeps the user gesture needed by the
     // pointer lock and audio unlock.
     if (onStartRequest?.(event) === false) return;
-    if (event?.pointerType === 'touch') game.classList.add('touch');
+    if (event?.pointerType === 'touch') {
+      game.classList.add('touch');
+      adoptTouchActions();
+    }
     active = true;
     const wasInspecting = isInspecting();
     onBegin?.();
