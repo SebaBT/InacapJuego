@@ -3,6 +3,7 @@ import { makeRenderer } from './render.js';
 import { makeTexturesAsync } from './textures.js';
 import { buildCorridor } from './corridor.js';
 import { firstPerson } from './walk.js';
+import { bindTap } from './touch-tap.js';
 import { computePlayerFear } from './player-motion.js';
 import { makeMascot } from './mascot.js';
 import { capturePose, createMonsterHunt } from './monster-hunt.js';
@@ -153,7 +154,7 @@ async function start() {
     button.innerHTML = `<span class="slot-key" aria-hidden="true">${index + 1}</span>
       <svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-${kind}"/></svg>
       <span class="slot-count" aria-hidden="true"></span>`;
-    button.addEventListener('click', () => selectEquipment(index));
+    bindTap(button, () => { unlockGameAudio(); selectEquipment(index); });
     ui['equip-slots'].append(button);
     return button;
   });
@@ -730,16 +731,14 @@ async function start() {
     syncHud();
     wake();
   }
-  useBtn?.addEventListener('click', e => {
-    e.stopPropagation();
+  bindTap(useBtn, () => {
     unlockGameAudio();
     handleUseItem();
-  });
-  holsterBtn?.addEventListener('click', e => {
-    e.stopPropagation();
+  }, { stopPropagation: true });
+  bindTap(holsterBtn, () => {
     unlockGameAudio();
     toggleHandsFree();
-  });
+  }, { stopPropagation: true });
   skipHint?.addEventListener('click', e => {
     e.stopPropagation();
     unlockGameAudio();

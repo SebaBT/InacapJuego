@@ -115,16 +115,18 @@
               <span class="key-chip desktop-only"><kbd>F</kbd>Usar</span>
               <span class="key-chip desktop-only"><kbd>1-6</kbd>Equipar</span>
               <span class="key-chip desktop-only"><kbd>X</kbd>Manos libres</span>
-              <span class="key-chip touch-only"><kbd>Pad</kbd>Mover y correr</span>
+              <span class="key-chip touch-only"><kbd>Pad</kbd>Mover</span>
+              <span class="key-chip touch-only"><kbd>Botón</kbd>Correr</span>
             </div>
           </div>
         </div>
       </header>
     </section>
-    <div id="stick" role="group" aria-label="Arrastra para moverte. Arrastra más lejos para correr.">
+    <div id="stick" role="group" aria-label="Arrastra para moverte.">
       <span class="stick-thumb" aria-hidden="true">·</span><span class="stick-label" aria-hidden="true">Mover</span>
     </div>
     <div class="touch-actions">
+      <button type="button" id="run-btn" aria-label="Correr" aria-pressed="false" title="Correr"><svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-run"/></svg><span class="action-label" aria-hidden="true">Correr</span></button>
       <button type="button" id="crouch-btn" aria-label="Agacharse" aria-pressed="false" title="Agacharse"><svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-crouch"/></svg></button>
       <button type="button" id="jump-btn" aria-label="Saltar" title="Saltar"><svg class="hud-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#icon-jump"/></svg></button>
     </div>

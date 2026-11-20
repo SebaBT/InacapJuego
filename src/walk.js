@@ -18,6 +18,7 @@ import {
 import { detectFloorSurface, makePlayerAudio } from './player-audio.js';
 import { createThirdPersonState, isThirdPersonTransitioning, stepBodyFacing, stepThirdPersonCamera } from './third-person.js';
 import { bindTouchStick } from './touch-stick.js';
+import { bindTap } from './touch-tap.js';
 
 const eyeHeight = 1.61;
 const radius = .245;
@@ -205,6 +206,7 @@ export function firstPerson(camera, obstacles, wake, {
   const enter = document.querySelector('#enter'), label = document.querySelector('#enter-label');
   const message = document.querySelector('#message'), stick = document.querySelector('#stick');
   const crouchBtn = document.querySelector('#crouch-btn'), jumpBtn = document.querySelector('#jump-btn');
+  const runBtn = document.querySelector('#run-btn');
   const cameraBtn = document.querySelector('#camera-btn');
   const sprintBar = document.querySelector('#sprint'), sprintFill = document.querySelector('#sprint-fill');
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -215,7 +217,7 @@ export function firstPerson(camera, obstacles, wake, {
   let active = false, locked = false, dragMode = false, noclip = false;
   let captured = false, noiseRadius = 0;
   let stompAge = 1, stompStrength = 0, stompSide = 1;
-  let touchCrouch = false, isCrouching = false, prevCrouching = false;
+  let touchCrouch = false, touchRun = false, isCrouching = false, prevCrouching = false;
   let lookId = null, lastX = 0, lastY = 0, messageTimer;
   let lookDeltaX = 0, lookYawDelta = 0, lookPitchDelta = 0, manualBlink = false, jumpQueued = false;
   let slamTimer = 0, slamSide = 1, slamStrength = 0, doorStepVx = 0, doorStepVz = 0, wishVx = 0, wishVz = 0;
@@ -258,7 +260,16 @@ export function firstPerson(camera, obstacles, wake, {
       crouchBtn.setAttribute('aria-pressed', String(isCrouching));
     }
     jumpBtn.disabled = !active || noclip || captured;
+    if (runBtn) runBtn.disabled = !active || noclip || captured;
     syncCameraBtn();
+  }
+
+  // The run button latches while the pad is held; letting go of the pad, getting
+  // tired or crouching clears it so a run never carries over by surprise.
+  function setTouchRun(value) {
+    touchRun = Boolean(value) && active && !captured && !noclip && !isCrouching;
+    if (runBtn) runBtn.setAttribute('aria-pressed', String(touchRun));
+    game.classList.toggle('touch-run', touchRun);
   }
 
   function syncCameraBtn() {
@@ -276,6 +287,7 @@ export function firstPerson(camera, obstacles, wake, {
     keys.clear();
     touchStick.reset();
     touchCrouch = false;
+    setTouchRun(false);
     syncCrouch();
   }
 
@@ -341,7 +353,7 @@ export function firstPerson(camera, obstacles, wake, {
   }
 
   function updateHud() {
-    stick.classList.toggle('running', touchStick.wantsSprint && stamina.isSprinting);
+    runBtn?.classList.toggle('running', touchRun && stamina.isSprinting);
     if (sprintBar && sprintFill) {
       sprintBar.classList.toggle('visible', active && !noclip);
       sprintBar.classList.toggle('exhausted', stamina.exhausted);
@@ -641,19 +653,35 @@ export function firstPerson(camera, obstacles, wake, {
   });
   // Keyboard and assistive activation have no preceding pointer press.
   jumpBtn.addEventListener('click', e => { if (e.detail === 0) queueJump(); });
-  crouchBtn?.addEventListener('click', e => {
+  bindTap(crouchBtn, e => {
     if (!active || noclip || captured) return;
     touchCrouch = !touchCrouch;
+    if (touchCrouch) setTouchRun(false);
     syncCrouch();
     if (e.detail > 0) canvas.focus({ preventScroll: true });
     audio.unlock();
   });
+  bindTap(runBtn, e => {
+    if (!active || noclip || captured) return;
+    setTouchRun(!touchRun);
+    if (e.detail > 0) canvas.focus({ preventScroll: true });
+    audio.unlock();
+  });
+  // Long-press menus and text selection must never interrupt a drag on the HUD.
+  for (const type of ['contextmenu', 'selectstart', 'dragstart']) {
+    document.addEventListener(type, e => {
+      if (game.classList.contains('touch') && !e.target?.closest?.('input, textarea')) e.preventDefault();
+    });
+  }
+  for (const button of [jumpBtn, cameraBtn, document.querySelector('#pause')]) {
+    for (const type of ['contextmenu', 'selectstart', 'dragstart']) button?.addEventListener(type, e => e.preventDefault());
+  }
   cameraBtn?.addEventListener('click', e => {
     if (noclip) return;
     toggleThirdPerson();
     if (active && e.detail > 0) canvas.focus({ preventScroll: true });
   });
-  document.querySelector('#interact-btn')?.addEventListener('click', () => {
+  bindTap(document.querySelector('#interact-btn'), () => {
     if (active && !captured) {
       audio.unlock();
       onInteract?.();
@@ -784,7 +812,8 @@ export function firstPerson(camera, obstacles, wake, {
     const forward = Number(keys.has('KeyW') || keys.has('ArrowUp')) - Number(keys.has('KeyS') || keys.has('ArrowDown')) - touchStick.y;
     const side = Number(keys.has('KeyD')) - Number(keys.has('KeyA')) + touchStick.x;
     const inputMag = Math.hypot(forward, side);
-    const wantsSprint = touchStick.wantsSprint || keys.has('ShiftLeft') || keys.has('ShiftRight');
+    if (touchRun && !touchStick.held) setTouchRun(false);
+    const wantsSprint = touchRun || keys.has('ShiftLeft') || keys.has('ShiftRight');
 
     if (noclip) {
       const damping = 1 - Math.exp(-16 * dt);
@@ -810,6 +839,7 @@ export function firstPerson(camera, obstacles, wake, {
       dt,
       adrenaline
     });
+    if (touchRun && stamina.exhausted) setTouchRun(false);
 
     // A sudden terror spike (spotting the monster up close) tears out a gasp,
     // then holds fire for a few seconds so the sound does not machine-gun.

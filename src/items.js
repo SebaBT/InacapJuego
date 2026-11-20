@@ -302,10 +302,10 @@ export function createWorldItems({ scene, makeMaterial, whiteTex = null, placeme
       const dy = item.y + 0.08 - camY;
       const dz = item.z - pose.z;
       const dist = Math.hypot(dx, dy, dz);
-      if (dist > 2.55 || dist < 0.08) continue;
+      if (dist > 2.9 || dist < 0.08) continue;
       const dot = (dx * dirX + dy * dirY + dz * dirZ) / dist;
       const miss = Math.sqrt(Math.max(0, 1 - dot * dot)) * dist;
-      if (dot < 0.54 || miss > 0.72) continue;
+      if (dot < 0.4 || miss > 0.95) continue;
       if (visible && !visible(pose, item)) continue;
       const score = dist * 0.55 + miss * 1.35;
       if (score < bestScore) {

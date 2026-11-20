@@ -27,7 +27,7 @@ function makeElement() {
 }
 
 function setupWalk(t, { reducedMotion = false, coarse = true, obstacles = [], onInteract, onStickDirection, onStartRequest } = {}) {
-  const ids = ['game', 'view', 'enter', 'enter-label', 'message', 'stick', 'pause', 'interact-btn', 'crouch-btn', 'jump-btn'];
+  const ids = ['game', 'view', 'enter', 'enter-label', 'message', 'stick', 'pause', 'interact-btn', 'crouch-btn', 'jump-btn', 'run-btn'];
   const elements = new Map(ids.map(id => ['#' + id, makeElement()]));
   const padRect = { left: 18, top: 230, width: 128, height: 128 };
   elements.get('#stick').getBoundingClientRect = () => padRect;
@@ -369,110 +369,133 @@ test('pausing on a raised landing preserves the floor under the player', t => {
   assert.equal(walk.pose.jump.grounded, true);
 });
 
-test('holding at or beyond the visible ring walks until the finger crosses the breakaway distance', t => {
+test('the pad only steers: it reaches full walking speed mid-ring and never sprints by overtravel', t => {
   const { walk, frames, click, touch } = setupWalk(t);
   const pad = document.querySelector('#stick');
   const radius = pad.getBoundingClientRect().width / 2;
   const thumbY = () => Math.abs(parseFloat(pad.firstElementChild.style.transform.split(',')[1]));
   click('enter');
   touch('stick', 'pointerdown');
-  touch('stick', 'pointermove', 0, -0.48);
+  touch('stick', 'pointermove', 0, -0.3);
+  frames(60);
+  assert.ok(walk.pose.vz > -WALK_SPEED && walk.pose.vz < 0, 'light push walks slowly');
+  touch('stick', 'pointermove', 0, -0.6);
   frames(60);
   assert.ok(Math.abs(walk.pose.vz + WALK_SPEED) < 0.001);
-  const walkTravel = thumbY();
-
-  touch('stick', 'pointermove', 0, -1);
-  const rimTravel = thumbY();
-  frames(180);
-  assert.equal(walk.pose.isSprinting, false);
-  assert.equal(thumbY(), rimTravel);
-  assert.ok(rimTravel > walkTravel);
-  touch('stick', 'pointermove', 0, -1.49);
-  const loadedTravel = thumbY();
-  frames(180);
-  assert.equal(walk.pose.isSprinting, false);
-  assert.equal(walk.pose.wishVz, -WALK_SPEED);
-  assert.equal(thumbY(), loadedTravel);
-  assert.ok(loadedTravel > rimTravel && loadedTravel - rimTravel < 0.10 * radius);
-  touch('stick', 'pointermove', 0, -1.51);
-  frames();
-  assert.equal(walk.pose.isSprinting, true);
-  assert.ok(thumbY() - loadedTravel > 0.10 * radius);
-  assert.ok(thumbY() < radius);
-  assert.ok(pad.classList.contains('running'));
-  assert.equal(walk.pose.wishVz, -SPRINT_SPEED);
-
-  touch('stick', 'pointermove', 0.85, -0.85);
-  frames();
-  assert.equal(walk.pose.isSprinting, true);
-  assert.ok(Math.abs(walk.pose.wishVx + walk.pose.wishVz) < 1e-9);
+  for (const reach of [1, 1.55, 2.4]) {
+    touch('stick', 'pointermove', 0, -reach);
+    frames(60);
+    assert.equal(walk.pose.isSprinting, false, 'dragging far never starts a run');
+    assert.equal(walk.pose.wishVz, -WALK_SPEED);
+    assert.ok(thumbY() <= radius, 'thumb stays inside the ring');
+  }
   touch('stick', 'pointermove', 1, 0);
   frames();
-  assert.equal(walk.pose.isSprinting, false);
   assert.equal(walk.pose.wishVx, WALK_SPEED);
-  touch('stick', 'pointermove', 0.99, -0.99);
-  frames();
-  assert.equal(walk.pose.isSprinting, false);
-  touch('stick', 'pointermove', 1.08, -1.08);
-  frames();
-  assert.equal(walk.pose.isSprinting, true);
-  assert.ok(Math.abs(Math.hypot(walk.pose.wishVx, walk.pose.wishVz) - SPRINT_SPEED) < 1e-9);
   touch('stick', 'pointerup');
   frames();
   assert.equal(walk.pose.wishVx, 0);
   assert.equal(thumbY(), 0);
 });
 
-test('rim touches must start a new push from inside, and interrupted drags release sprint', t => {
+test('interrupted or lost touches can never leave the pad stuck', t => {
   const { walk, frames, click, touch } = setupWalk(t);
   const pad = document.querySelector('#stick');
   click('enter');
-  touch('stick', 'pointerdown', 1, 0);
-  touch('stick', 'pointermove', 1.7, 0);
-  frames(30);
-  assert.equal(walk.pose.wishVx, WALK_SPEED);
   for (const event of ['pointercancel', 'lostpointercapture']) {
-    touch('stick', 'pointermove', 0.5, 0);
-    touch('stick', 'pointermove', 1.46, 0);
-    frames(5);
-    touch('stick', 'pointermove', 0.5, 0);
+    touch('stick', 'pointerdown');
+    touch('stick', 'pointermove', 0.8, 0);
     frames(15);
-    assert.equal(walk.pose.isSprinting, false);
-    touch('stick', 'pointermove', 1.55, 0);
-    frames();
-    assert.equal(walk.pose.isSprinting, true);
+    assert.equal(walk.pose.wishVx, WALK_SPEED);
     touch('stick', event);
     frames(15);
     assert.equal(walk.pose.wishVx, 0);
     assert.equal(pad.hasPointerCapture(1), false);
-    touch('stick', 'pointerdown');
   }
-  touch('stick', 'pointermove', 1.6, 0);
-  frames(6);
+  // The browser dropped the finger without telling the pad: the next finger takes over.
+  touch('stick', 'pointerdown');
+  touch('stick', 'pointermove', 0.8, 0);
+  pad.releasePointerCapture(1);
+  touch('stick', 'pointerdown', 0, 0.8, 3);
+  frames(15);
+  assert.ok(walk.pose.wishVz > 0 && walk.pose.wishVx === 0, 'a stale id is replaced by the new finger');
+  touch('stick', 'pointerup', 0, 0.8, 3);
+  // Every finger lifted anywhere on the page releases the pad even if its own events never arrived.
+  touch('stick', 'pointerdown');
+  touch('stick', 'pointermove', 0.8, 0);
+  frames(15);
+  assert.equal(walk.pose.wishVx, WALK_SPEED);
+  window.dispatchEvent(Object.assign(new Event('touchend'), { touches: [] }));
+  frames(15);
+  assert.equal(walk.pose.wishVx, 0);
+  // Pausing while a finger is down clears the pad too.
+  touch('stick', 'pointerdown');
+  touch('stick', 'pointermove', 0.8, 0);
   click('pause');
   click('enter');
-  touch('stick', 'pointermove', 1.6, 0);
   frames(30);
   assert.equal(walk.pose.wishVx, 0);
-  assert.equal(walk.pose.isSprinting, false);
 });
 
-test('the ring follows the same crouch and exhaustion limits as keyboard sprint', t => {
+test('the separate run button latches a run only while the pad is held', t => {
   const { walk, frames, click, touch } = setupWalk(t);
-  const pad = document.querySelector('#stick');
+  const run = document.querySelector('#run-btn');
+  assert.equal(run.disabled, true);
+  click('enter');
+  assert.equal(run.disabled, false);
+  touch('stick', 'pointerdown');
+  touch('stick', 'pointermove', 0, -0.7);
+  frames(30);
+  assert.equal(walk.pose.isSprinting, false);
+  touch('run-btn', 'pointerdown', 0, 0, 2);
+  click('run-btn', 1);
+  frames();
+  assert.equal(run.getAttribute('aria-pressed'), 'true', 'the touch press is not toggled twice by its click');
+  assert.equal(walk.pose.isSprinting, true);
+  assert.equal(walk.pose.wishVz, -SPRINT_SPEED);
+  touch('run-btn', 'pointerup', 0, 0, 2);
+  frames(10);
+  assert.equal(walk.pose.isSprinting, true, 'lifting the run finger keeps running');
+  touch('run-btn', 'pointerdown', 0, 0, 2);
+  frames();
+  assert.equal(walk.pose.isSprinting, false, 'a second tap stops the run');
+  touch('run-btn', 'pointerdown', 0, 0, 2);
+  frames();
+  assert.equal(walk.pose.isSprinting, true);
+  touch('stick', 'pointerup');
+  frames(5);
+  touch('stick', 'pointerdown');
+  touch('stick', 'pointermove', 0, -0.7);
+  frames(5);
+  assert.equal(walk.pose.isSprinting, false, 'a new push starts walking again');
+  assert.equal(run.getAttribute('aria-pressed'), 'false');
+});
+
+test('the run button follows the same crouch and exhaustion limits as keyboard sprint', t => {
+  const { walk, frames, click, touch } = setupWalk(t);
+  const run = document.querySelector('#run-btn');
   click('enter');
   click('crouch-btn');
   touch('stick', 'pointerdown');
-  touch('stick', 'pointermove', 0, -1.55);
+  touch('stick', 'pointermove', 0, -0.7);
+  touch('run-btn', 'pointerdown', 0, 0, 2);
   frames(1, 210);
   assert.equal(walk.pose.wishVz, -CROUCH_SPEED);
-  assert.equal(pad.classList.contains('running'), false);
+  assert.equal(run.getAttribute('aria-pressed'), 'false', 'crouching refuses the run');
   click('crouch-btn');
+  touch('run-btn', 'pointerdown', 0, 0, 2);
   frames();
   assert.equal(walk.pose.isSprinting, true);
+  touch('run-btn', 'pointerdown', 0, 0, 2);
+  click('crouch-btn');
+  assert.equal(run.getAttribute('aria-pressed'), 'false', 'crouching clears a latched run');
+  click('crouch-btn');
+  touch('run-btn', 'pointerdown', 0, 0, 2);
   frames(485);
   assert.equal(walk.pose.exhausted, true);
-  assert.equal(pad.classList.contains('running'), false);
+  assert.equal(run.getAttribute('aria-pressed'), 'false', 'exhaustion clears the run');
+  frames(30);
+  assert.equal(walk.pose.isSprinting, false);
 });
 
 test('a second finger jumps on contact while running and release cannot jump a second time', t => {
@@ -482,7 +505,8 @@ test('a second finger jumps on contact while running and release cannot jump a s
   click('enter');
   assert.equal(jump.disabled, false);
   touch('stick', 'pointerdown');
-  touch('stick', 'pointermove', 0, -1.55);
+  touch('stick', 'pointermove', 0, -0.7);
+  touch('run-btn', 'pointerdown', 0, 0, 4);
   frames(20);
   touch('jump-btn', 'pointerdown', 0, 0, 2);
   frames();
